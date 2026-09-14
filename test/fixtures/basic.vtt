@@ -1,0 +1,25 @@
+WEBVTT
+
+NOTE This file exercises identifiers, speakers, sounds, meta and line settings.
+
+1
+00:00:01.000 --> 00:00:03.500
+<v Maria>Are you coming?
+
+2
+00:00:03.520 --> 00:00:05.000 line:1
+[door slams]
+
+3
+00:00:05.000 --> 00:00:05.200
+Too short
+
+00:00:07.000 --> 00:00:09.000
+Night. A rooftop. Words appear: <i>Berlin, 1989</i> {extended=1;words=7}
+
+00:00:10.000 --> 00:00:14.000
+[Anna] I told you to wait.
+Twice.
+
+00:00:20.000 --> 00:00:24.000
+<c.sound>wind howls</c>

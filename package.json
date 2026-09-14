@@ -1,0 +1,110 @@
+{
+  "name": "@moizp/vega-media-kit",
+  "version": "0.1.0-alpha.0",
+  "description": "One player API, one cue model, one set of Fire TV platform bindings for React Native apps on Fire OS and Vega OS.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/moiz-lakkadkutta/vega-media-kit"
+  },
+  "keywords": [
+    "fire-tv",
+    "vega",
+    "react-native",
+    "tv",
+    "hls",
+    "webvtt",
+    "shaka",
+    "captions",
+    "audio-description"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "react-native": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "react-native": "./src/index.ts"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js",
+      "require": "./dist/core/index.cjs",
+      "react-native": "./src/core/index.ts"
+    },
+    "./player": {
+      "types": "./dist/player/index.d.ts",
+      "import": "./dist/player/index.js",
+      "require": "./dist/player/index.cjs",
+      "react-native": "./src/player/index.ts"
+    },
+    "./cues": {
+      "types": "./dist/cues/index.d.ts",
+      "import": "./dist/cues/index.js",
+      "require": "./dist/cues/index.cjs",
+      "react-native": "./src/cues/index.ts"
+    },
+    "./platform": {
+      "types": "./dist/platform/index.d.ts",
+      "import": "./dist/platform/index.js",
+      "require": "./dist/platform/index.cjs",
+      "react-native": "./src/platform/index.ts"
+    },
+    "./focus": {
+      "types": "./dist/focus/index.d.ts",
+      "import": "./dist/focus/index.js",
+      "require": "./dist/focus/index.cjs",
+      "react-native": "./src/focus/index.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src test",
+    "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build",
+    "changeset": "changeset",
+    "release": "changeset version && pnpm build && changeset publish"
+  },
+  "peerDependencies": {
+    "@amazon-devices/react-native-w3cmedia": "*",
+    "react": ">=18",
+    "react-native": ">=0.72",
+    "react-native-video": ">=6",
+    "react-tv-space-navigation": ">=4"
+  },
+  "peerDependenciesMeta": {
+    "react-native-video": {
+      "optional": true
+    },
+    "@amazon-devices/react-native-w3cmedia": {
+      "optional": true
+    },
+    "react-tv-space-navigation": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.0",
+    "@types/node": "^26.5.1",
+    "@types/react": "^19.0.0",
+    "eslint": "^9.0.0",
+    "react": "^19.0.0",
+    "react-native": "0.81.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
