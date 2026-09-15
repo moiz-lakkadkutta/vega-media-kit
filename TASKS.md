@@ -8,16 +8,19 @@ been recorded, so no ticket is gate-blocked at time of writing. The Sept 17 gate
 
 | Ticket | Title | Role chain | Gate | Status |
 |---|---|---|---|---|
-| KIT-001 | Week-0 spike runbook (`docs/spike-runbook.md`) | Spike (fable) → Reviewer (fable) → Implementer (opus) | open | applying review findings |
+| KIT-001 | Week-0 spike runbook (`docs/spike-runbook.md`) | Spike (fable) → Reviewer (fable) → Implementer (opus) | open | **done** (`8e93273`, CI green) |
 | KIT-002/003/004 | HLS master-playlist parsing (`src/player/hls.ts`); retire the `x-kit-text-urls` header hack; fixture tests | Planner (fable) → Implementer (opus) | open | not started |
 | KIT-005 | Playwright harness for `CueOverlay` via the web adapter + CI job | Implementer (opus) → Reviewer (fable) | open | not started |
 | KIT-008 | `docs/getting-started.md` + README updated to what the spike changed; changeset for 0.1.0 | Scribe (opus) | open | not started |
-| KIT-009 | `preferredText` auto-selection never delivers cues (`KitPlayer.tsx:33` bypasses `api.selectText`) | Implementer (opus) → Reviewer (fable) | open | in progress |
+| KIT-009 | `preferredText` auto-selection never delivers cues (`KitPlayer.tsx:33` bypasses `api.selectText`) | Implementer (opus) → Reviewer (fable) → Implementer (opus) | open | applying review findings |
+| KIT-011 | `selectedText` / `appliedPrefs` / scheduler tracks are never reset when `props.source` changes | Planner (fable) → Implementer (opus) | open | not started |
+| KIT-012 | `CueScheduler` rebuilt whenever `props.onCue` identity changes; `api` rebuilt every position tick | Implementer (opus) | open | not started |
+| KIT-013 | `web.tsx:19` labels every text track `kind: 'subtitles'`, so `kinds: ['captions']` matches nothing on web | Implementer (opus) | open | not started |
 | KIT-010 | Rewrite the Vega adapter onto `VideoPlayer` class + `KeplerVideoSurfaceView` (see `docs/decisions/0002`) | Planner (fable) → Implementer (opus) → Reviewer (fable) | open | not started |
 
 `KIT-006` and `KIT-007` are not described in `docs/KICKOFF.md`. Left unlisted rather than invented.
-`KIT-009` and `KIT-010` were opened by the orchestrator from KIT-001's findings; renumber if they collide
-with the human's own numbering.
+`KIT-009`–`KIT-013` were opened by the orchestrator from the KIT-001 and KIT-009 review findings; renumber
+if they collide with the human's own numbering.
 
 ## KIT-009 detail
 
@@ -28,6 +31,22 @@ it — so an app that passes `preferredText` and nothing else gets tracks select
 fetched VTT is silently dropped and `onCue` never fires. Affects the `web` and `fireos` scheduler paths
 today, Vega too if the spike lands on scheduler-over-fetched-VTT, and both consuming apps: it is the
 documented "ten minutes to a playing video" path in `README.md`. `preferredAudio` (`:31-32`) is unaffected.
+
+## KIT-011/012/013 detail
+
+All three are **pre-existing** defects found by the KIT-009 reviewer and deliberately excluded from that
+ticket to keep its diff reviewable.
+
+- **KIT-011** — `KitPlayer.tsx:20-21,44`: a second `source` inherits the previous source's selected ids and
+  its stale cues (fireos/Shaka ids are small integers, so they collide), and `preferredText` is never
+  re-applied because `appliedPrefs` stays `true`.
+- **KIT-012** — `KitPlayer.tsx:23`: an inline `onCue` rebuilds the scheduler every render, dropping every
+  loaded track. `README.md` and both apps pass a stable `setCues`, so it is latent, not live. Separately,
+  `api` is rebuilt on every position tick because `getPosition` closes over `position` state, churning
+  `useImperativeHandle` and `renderControls` at ≤ 4 Hz.
+- **KIT-013** — `described`'s default `kinds: ['captions']` still matches nothing on the web harness after
+  KIT-009, because the web adapter hard-codes every track's kind. Do not read "KIT-009 landed" as
+  "described works on web".
 
 ## KIT-010 detail
 

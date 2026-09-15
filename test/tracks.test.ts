@@ -28,6 +28,31 @@ describe('tracks', () => {
     const t = fromShakaText([{ id: 1, language: 'en', active: false }, { id: 2, language: 'de', active: false }])
     expect(pickText(t, { languages: ['de', 'en'] }).map((x) => x.language)).toEqual(['de', 'en'])
   })
+  it('treats an explicit empty kinds or languages array as "matches nothing"', () => {
+    // An app says "captions off" by passing an empty array; returning every track instead would
+    // stack every language and description on screen at once.
+    const t = fromShakaText([
+      { id: 1, language: 'en', kind: 'caption', active: false },
+      { id: 2, language: 'de', kind: 'subtitle', active: false },
+      { id: 3, language: 'en', roles: ['description'], active: false },
+    ])
+    expect(pickText(t, { kinds: [] })).toEqual([])
+    expect(pickText(t, { languages: [] })).toEqual([])
+    expect(pickText(t, { kinds: [], languages: ['en'] })).toEqual([])
+    expect(pickText(t, { kinds: ['captions'], languages: [] })).toEqual([])
+  })
+  it('treats an omitted kinds or languages key as "any", and an omitted preference as no filter', () => {
+    const t = fromShakaText([
+      { id: 1, language: 'en', kind: 'caption', active: false },
+      { id: 2, language: 'de', kind: 'subtitle', active: false },
+      { id: 3, language: 'en', roles: ['description'], active: false },
+    ])
+    expect(pickText(t, { languages: ['en'] }).map((x) => x.id)).toEqual(['1', '3']) // any kind
+    expect(pickText(t, { kinds: ['captions'] }).map((x) => x.id)).toEqual(['1']) // any language
+    expect(pickText(t, {})).toEqual(t)
+    // No preference filters nothing; KitPlayer guards the absent `preferredText` itself.
+    expect(pickText(t, undefined)).toEqual(t)
+  })
   it('defaults unknown roles to main', () => {
     expect(normalizeRoles(['weird'])).toEqual(['main'])
   })

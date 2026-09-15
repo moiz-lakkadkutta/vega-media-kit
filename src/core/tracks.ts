@@ -107,10 +107,20 @@ export function pickAudio(tracks: AudioTrack[], pref?: { language?: string; role
   return byLang[0] ?? byRole[0] ?? tracks.find((t) => t.roles.includes('main')) ?? tracks[0]
 }
 
+/**
+ * Filter text tracks by preference, ordered by the caller's language list.
+ *
+ * An empty array is an explicit choice, not an absent one: `kinds: []` matches no kind and
+ * `languages: []` matches no language, so either yields `[]` — that is how an app says "captions off".
+ * An omitted key means "any": `{ languages: ['de'] }` still matches every kind, and `{ kinds: ['captions'] }`
+ * every language. An omitted `pref` filters nothing and returns all tracks, so callers that must not
+ * select anything without an explicit preference (KitPlayer's `preferredText` auto-selection) check for
+ * the absent preference themselves rather than leaning on this.
+ */
 export function pickText(tracks: TextTrack[], pref?: { languages?: string[]; kinds?: TextKind[] }): TextTrack[] {
   let out = tracks
-  if (pref?.kinds?.length) out = out.filter((t) => pref.kinds!.includes(t.kind))
-  if (pref?.languages?.length) {
+  if (pref?.kinds) out = out.filter((t) => pref.kinds!.includes(t.kind))
+  if (pref?.languages) {
     const wanted = pref.languages.map((l) => l.toLowerCase())
     out = out.filter((t) => wanted.some((w) => t.language.toLowerCase().startsWith(w)))
     out.sort((a, b) => wanted.findIndex((w) => a.language.toLowerCase().startsWith(w)) - wanted.findIndex((w) => b.language.toLowerCase().startsWith(w)))
