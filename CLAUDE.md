@@ -6,3 +6,7 @@
 - Multi text-track selection is a feature, not a bug. Never disable it to "simplify".
 - Every user-facing change gets a changeset. Conventional commits.
 - When you hit platform friction, write it up in the consuming app's `docs/friction/` in the hackathon's format (task, steps, expected, actual, severity, workaround, suggestion).
+
+## Development style
+
+Orchestrator + sub-agents. The main session only facilitates; planning, implementation and review are done by sub-agents (fable for judgement, opus for well-bounded implementation). Protocol: docs/ORCHESTRATOR.md. Kickoff prompt: docs/KICKOFF.md.
