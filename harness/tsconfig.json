@@ -1,0 +1,7 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "noEmit": true, "types": ["node"], "lib": ["ES2022", "DOM", "DOM.Iterable"] },
+  // ../src/types: ambient `shaka-player` module for vega.tsx, reached via KitPlayer → adapters/index.ts;
+  // removing it breaks `typecheck:harness` with TS2307.
+  "include": [".", "../src/types"]
+}

@@ -209,7 +209,7 @@ describe('fetchHlsVtt (moved, behaviour pinned)', () => {
   })
 })
 
-/** Source guards, same spirit as test/selection.test.ts "KitPlayer wiring": wiring no unit test can reach. */
+/** Source guards, same spirit as test/selection.test.ts "KitPlayer wiring": wiring no unit test can reach. The web adapter's equivalents are behavioural — harness/e2e/player.spec.ts renders the real adapter in Chromium (KIT-005). */
 describe('adapter wiring', () => {
   const fireos = () => src('player/adapters/fireos.tsx')
   const web = () => src('player/adapters/web.tsx')
@@ -248,40 +248,20 @@ describe('adapter wiring', () => {
     expect(s.match(/props\.onTracks\?\.\(/g)).toHaveLength(1)
   })
 
-  it('the web adapter publishes tracks only after the manifest promise resolves', () => {
-    const s = web()
-    // The same `appliedPrefs` latch as Fire OS above, on the other adapter (plan §4.7 web step 3, R7).
-    // Publishing from the `loadedmetadata` listener alone would hand KitPlayer a track list with no
-    // manifest tracks, latch `appliedPrefs` on it, and `preferredText` would never be applied. The publish
-    // must hang off the join of BOTH promises, and must be built from the manifest's resolved value.
-    const joined = s.search(/Promise\.all\(\[\s*manifest\s*,\s*metadata\s*\]\)/)
-    const published = s.indexOf('props.onTracks?.(')
-    expect(joined).toBeGreaterThan(-1)
-    expect(published).toBeGreaterThan(-1)
-    expect(joined).toBeLessThan(published)
-    expect(s.match(/props\.onTracks\?\.\(/g)).toHaveLength(1)
-    expect(s).toMatch(/Promise\.all\(\[\s*manifest\s*,\s*metadata\s*\]\)\.then\(\(\[\s*manifestText\s*\]\)/)
-  })
-
   it('no TODO(spike KIT-001) remains in the Fire OS adapter', () => {
     expect(fireos()).not.toContain('TODO(spike KIT-001)')
   })
 
-  // The two guards below exist because mutation-testing this file found the deprecated header's *merge
-  // semantics* unprotected: both mutations (dropping the override, dropping the header-only ids) left every
-  // test green. They are adapter-internal and only observable through a rendered component, so — as with
-  // the ordering guard above — the check is structural. Crude, but it fails when the contract is broken.
+  // The guard below exists because mutation-testing this file found the deprecated header's *merge
+  // semantics* unprotected on Fire OS: dropping the override left every test green. It is adapter-internal
+  // and only observable through a rendered component, so — as with the ordering guard above — the check is
+  // structural. Crude, but it fails when the contract is broken. The web adapter's merge is asserted by
+  // `player.spec.ts › 'deprecated x-kit-text-urls still adds ids …'`.
   it('the Fire OS adapter writes the url map once, and that write is the header override', () => {
     const s = fireos()
     // Manifest URLs build the map; the deprecated header is merged *after* it, so an entry overrides a
     // manifest URL for the same id (docs/decisions/0004). A second write to the map would undo that.
     expect(s.match(/urls\.set\(/g)).toHaveLength(1)
     expect(s).toMatch(/Object\.entries\(deprecatedTextUrls\([^)]*\)\)\)\s*urls\.set\(/)
-  })
-
-  it('the web adapter still adds text tracks for header ids the manifest did not produce', () => {
-    // The one-release bridge for app-composed ids (described's `captions-en`) and for the KIT-005
-    // harness's `.mp4` sources, which have no manifest at all.
-    expect(web()).toMatch(/text\.push\(\{ id,/)
   })
 })

@@ -12,3 +12,23 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+  harness:
+    # Playwright: the real CueOverlay + KitPlayer + WebAdapter in Chromium (docs/plans/KIT-005-harness.md).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm typecheck:harness
+      - run: pnpm harness
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: harness-report
+          path: |
+            harness/playwright-report
+            harness/test-results
+          retention-days: 7
