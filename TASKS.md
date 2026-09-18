@@ -19,9 +19,9 @@ release notes in waiting.
 | 2026-09-18 | `9ed3249` | **KIT-002/003/004** — HLS master-playlist parsing; `x-kit-text-urls` deprecated (decision 0004) | 112 |
 | 2026-09-18 | `ff7eac1` `d280dfa` | **KIT-005** — web `.m3u8` subtitles via `fetchHlsVtt` (plan Q7); Playwright harness (`harness/`, 16 specs) + CI job `harness`; two web structural guards retired | 110 + 16 |
 | 2026-09-18 | `d36b2bc` | **KIT-008** — README/getting-started match HEAD (`'kepler'`, rewrite not rename, manifest text tracks); four changesets → `release-0-1-0.md` | 110 + 16 |
-| 2026-09-18 | _pending_ | **KIT-011** — reset on `source.uri` change (decision 0005) · **KIT-012** — scheduler built once, `api` stable | 120 + 20 |
+| 2026-09-18 | `8ec1143` | **KIT-011** — reset on `source.uri` change (decision 0005) · **KIT-012** — scheduler built once, `api` stable | 120 + 20 |
 
-CI is green on every commit above (`d280dfa`: both `test` and the new `harness` job). `main` == `origin/main` at `d280dfa`.
+CI is green on every commit above (`test` + `harness` jobs). `main` == `origin/main` at `8ec1143`.
 
 ## Tickets
 
@@ -34,8 +34,8 @@ CI is green on every commit above (`d280dfa`: both `test` and the new `harness` 
 | KIT-005 | Playwright harness for `CueOverlay` via the web adapter + CI job | Planner (opus*) → Implementer (opus) → Reviewer (opus*) → Implementer (opus) | **done** `ff7eac1` `d280dfa` |
 | KIT-008 | `docs/getting-started.md` + README to match the spike; changeset for 0.1.0 | Scribe (opus) ×2 | **done** `d36b2bc` |
 | KIT-014 | `preferredText={{}}` / `{ languages: undefined }` selects every text track | Planner (fable) → Implementer (opus) | not started — **needs a human decision** |
-| KIT-011 | `selectedText` / `appliedPrefs` / scheduler never reset on `source` change | Planner (opus*) → Implementer (opus) ×2 → Reviewer (opus*) | **done** (decision 0005) |
-| KIT-012 | Scheduler rebuilt on `onCue` identity change; `api` rebuilt every position tick | Implementer (opus) → Reviewer (opus*, shared with KIT-011) | **done** |
+| KIT-011 | `selectedText` / `appliedPrefs` / scheduler never reset on `source` change | Planner (opus*) → Implementer (opus) ×2 → Reviewer (opus*) | **done** `8ec1143` (decision 0005) |
+| KIT-012 | Scheduler rebuilt on `onCue` identity change; `api` rebuilt every position tick | Implementer (opus) → Reviewer (opus*, shared with KIT-011) | **done** `8ec1143` |
 | KIT-015 | `onTracks` before `onState('ready')` as a kit-wide contract (web: emit `ready` from the join; Vega: publish before `ready`); then assert order in harness spec 11 | Planner → Implementer | not started (from KIT-005 review) |
 | KIT-016 | Web `selectText` failures unobservable: `fetchHlsVtt` never checks `res.ok`, non-VTT body triggers per-line fetches, rejected promise discarded at `KitPlayer.tsx:38` → route through `onError` | Implementer (opus) | not started (from KIT-005 review) |
 | KIT-017 | `CueOverlay`: selectable primary cue skips `numberOfLines={2}`; migrate `accessibilityLabel`/`accessibilityRole`/`pointerEvents` to `aria-label`/`role`/`style.pointerEvents` | Implementer (opus) | not started (from KIT-005 review) |
