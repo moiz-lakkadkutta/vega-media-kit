@@ -26,15 +26,19 @@ export function deferred() {
  * it, and the WebM when the `<video>` element loads it (`resourceType() === 'media'`). Either half can be
  * held behind a gate so a spec controls the order in which the adapter sees them.
  */
-export async function routeStream(page: Page, gates: { manifest?: Promise<void>; media?: Promise<void> } = {}) {
+export async function routeStream(
+  page: Page,
+  gates: { manifest?: Promise<void>; media?: Promise<void>; hold?: Record<string, Promise<void>> } = {},
+) {
   const hits: string[] = []
   await page.route('**/stream/**', async (route) => {
     const req = route.request()
     const rel = new URL(req.url()).pathname.replace(/^\/stream\//, '')
     hits.push(`${req.resourceType()} ${rel}`)
     // The player page loads `/stream/master` (no extension): Chromium sniffs `.m3u8` in a media URL before
-    // demuxing and would refuse the WebM. The on-disk fixture keeps its `.m3u8` name (plan §13).
-    if (/^master(\.m3u8)?$/.test(rel) && req.resourceType() === 'media') {
+    // demuxing and would refuse the WebM. The on-disk fixture keeps its `.m3u8` name (plan §13). `master-b`
+    // is the second source for the source-switch specs: same subtitle ids, different cue text.
+    if (/^master(-b)?(\.m3u8)?$/.test(rel) && req.resourceType() === 'media') {
       await gates.media
       // Chromium marks a media resource seekable only when the server honours Range (Accept-Ranges + 206);
       // a bare 200 loads but clamps every seek to 0 (probe, §10 step 1). Chromium sends `Range: bytes=0-`.
@@ -54,8 +58,9 @@ export async function routeStream(page: Page, gates: { manifest?: Promise<void>;
         },
       })
     }
-    if (/^master(\.m3u8)?$/.test(rel)) await gates.manifest
-    return route.fulfill({ path: FIX(`stream/${rel === 'master' ? 'master.m3u8' : rel}`), contentType: rel.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'text/vtt' })
+    if (/^master(-b)?(\.m3u8)?$/.test(rel)) await gates.manifest
+    await gates.hold?.[rel] // one text path held back, so a spec can make a fetch resolve late on purpose
+    return route.fulfill({ path: FIX(`stream/${/^master(-b)?$/.test(rel) ? `${rel}.m3u8` : rel}`), contentType: rel.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'text/vtt' })
   })
   return hits
 }

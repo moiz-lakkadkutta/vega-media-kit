@@ -40,7 +40,12 @@ export interface KitPlayerProps {
 
 /** What every adapter implements. Adapters are React components that accept these props and expose a ref. */
 export interface AdapterProps extends KitPlayerProps {
-  /** Adapter-independent cue delivery: adapters that can't emit cues call this with fetched VTT text per track. */
+  /**
+   * Adapter-independent cue delivery: adapters that can't emit cues call this with fetched VTT text per track.
+   * Call the `onTextTrackData` you were handed at `selectText` time — capture it in the closure; never read it
+   * through a latest-props ref. The kit re-creates it per `source.uri` and uses which handler delivered the VTT
+   * to drop fetches that were started for a previous source (docs/decisions/0005 §4).
+   */
   onTextTrackData?(trackId: string, vtt: string): void
 }
 

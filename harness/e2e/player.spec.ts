@@ -6,7 +6,8 @@ import { cueIds, deferred, events, routeStream } from './helpers'
  * The real KitPlayer + WebAdapter in Chromium (plan §5, specs 10–16): `onTracks` ordering against a real
  * `loadedmetadata`, `preferredText`, Q7, multi-track cue delivery from one `selectText([...])`, the deprecated
  * header bridge and `timeupdate`. Cue timing goes through `ref.seek()` (synchronous `scheduler.update`); only
- * the last spec plays the element for real.
+ * the playback specs play the element for real. Specs 19–20 (KIT-012): an inline `onCue` must not rebuild the
+ * scheduler, and the `ref` handed to `renderControls` must not change identity on position ticks or `onTracks`.
  */
 const BASE = 'http://localhost:4173'
 const trackEvents = (page: Page) => events(page).then((e) => e.filter((x) => x.type === 'tracks'))
@@ -18,6 +19,16 @@ const MANIFEST_TRACKS = [
   { id: '0', language: 'de', label: 'Deutsch', kind: 'subtitles', active: false, url: `${BASE}/stream/subs/de/index.m3u8` },
   { id: '1', language: 'en', label: 'English', kind: 'subtitles', active: false, url: `${BASE}/stream/subs/en/index.m3u8` },
 ]
+/** Stream B (`master-b`): the same ids '0'/'1' on purpose (ids are ordinals, decision 0004), different cue text. */
+const MANIFEST_TRACKS_B = MANIFEST_TRACKS.map((t) => ({ ...t, url: t.url.replace('/stream/subs/', '/stream/subs-b/') }))
+const cueText = (page: Page, t: number) => page.evaluate((t) => window.__kit.seek(t).map((c) => c.text), t)
+/** Switch the page's source and return exactly the events the switch itself logged (setSource is synchronous). */
+const setSource = (page: Page, uri: string) =>
+  page.evaluate((uri) => {
+    const n = window.__kit.events.length
+    window.__kit.setSource(uri)
+    return window.__kit.events.slice(n)
+  }, uri)
 
 test('onTracks waits for the manifest: nothing is published on loadedmetadata alone', async ({ page }) => {
   const m = deferred()
@@ -120,4 +131,86 @@ test('a playing element drives cues through timeupdate', async ({ page }) => {
     .toBe(true)
   expect(await hasState(page, 'playing')).toBe(true)
   expect(await page.getByTestId('kit-video').evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(1)
+})
+
+test('switching source clears the cues and re-applies preferredText to the new source', async ({ page }) => {
+  await routeStream(page)
+  await page.goto('/player.html?preferred=' + encodeURIComponent('{"languages":["de"]}'))
+  await waitForTracks(page)
+  await expect.poll(() => cueText(page, 2)).toEqual(['Hallo Welt']) // A's de is '0', auto-selected, cue on screen
+
+  const during = await setSource(page, '/stream/master-b')
+  // (a) The reset itself emits onCue([]) — once, synchronously, before B has loaded anything (0005 §2.3).
+  expect(during.filter((e) => e.type === 'cue')).toEqual([{ type: 'cue', ids: [] }])
+  expect(during.some((e) => e.type === 'tracks')).toBe(false) // no synthetic onTracks (0005 §3)
+
+  // (b) Exactly one more onTracks, and it is B's list: same ids, B's urls.
+  await expect.poll(() => trackEvents(page).then((t) => t.length)).toBe(2)
+  const [, b] = await trackEvents(page)
+  expect(b!.type === 'tracks' && b!.tracks.text).toEqual(MANIFEST_TRACKS_B)
+
+  // (c) preferredText is re-applied on B: id '0' again, but B's text — and A's text never reappears in between.
+  const seen: string[][] = []
+  await expect
+    .poll(async () => {
+      const t = await cueText(page, 2)
+      seen.push(t)
+      return t
+    })
+    .toEqual(['Zweite Quelle'])
+  for (const sample of seen) expect([[], ['Zweite Quelle']]).toContainEqual(sample)
+  expect(await cueIds(page, 2)).toEqual(['0:c1']) // the id collides with A's by construction; only the text tells
+  await page.waitForTimeout(300)
+  expect(await trackEvents(page)).toHaveLength(2)
+})
+
+test('VTT fetched for the previous source is dropped even though the new source selected the same id', async ({ page }) => {
+  // A's fetch for '0' is held on one of its segments (fetchHlsVtt joins all segments before delivering), so it
+  // resolves only after B has selected '0' and B's own VTT has landed — the race in 0005 §4, made deterministic.
+  const late = deferred()
+  const hits = await routeStream(page, { hold: { 'subs/de/seg-1.vtt': late.promise } })
+  await page.goto('/player.html?preferred=' + encodeURIComponent('{"languages":["de"]}'))
+  await waitForTracks(page)
+  await expect.poll(() => hits).toContain('fetch subs/de/seg-1.vtt') // A's fetch is in flight
+  expect(await cueText(page, 2)).toEqual([]) // and has not delivered
+
+  await setSource(page, '/stream/master-b')
+  await expect.poll(() => cueText(page, 2)).toEqual(['Zweite Quelle']) // B selected '0' and its VTT landed
+
+  const delivered = page.waitForResponse('**/stream/subs/de/seg-1.vtt').then((r) => r.finished())
+  late.resolve() // A's VTT for '0' arrives now, through the handler A's selectText captured
+  await delivered // the body is in the page; fetchHlsVtt's join and the adapter's onTextTrackData are microtasks away
+  await page.waitForTimeout(500)
+  // Seek where B has nothing first: A's c3 (8–10 s) would show up here. It also empties the active set, so the
+  // t=2 read below is a fresh emission — A's and B's first cue are both '0:c1', and a same-id replacement is
+  // invisible to the scheduler's id-based change detection; only the text tells, and only after a change.
+  expect(await cueText(page, 9)).toEqual([]) // A's second segment did not land
+  expect(await cueText(page, 2)).toEqual(['Zweite Quelle']) // still B, not 'Hallo Welt'
+})
+
+test('an inline onCue does not rebuild the scheduler: cues survive re-renders', async ({ page }) => {
+  // `?inlineCallbacks=1`: onCue/onPosition are fresh arrows on every App render, the way an app that did not
+  // read the README passes them. The scheduler must be constructed once and read the latest onCue through a
+  // ref; if it is keyed on onCue's identity, every render drops every loaded track and t=2 reads `[]`.
+  await routeStream(page)
+  await page.goto('/player.html?inlineCallbacks=1&preferred=' + encodeURIComponent('{"languages":["de"]}'))
+  await waitForTracks(page)
+  await expect.poll(() => cueIds(page, 2)).toEqual(['0:c1']) // de auto-selected, VTT landed in the scheduler
+  const renders = await page.evaluate(() => window.__kit.renders())
+  for (let i = 0; i < 3; i++) await page.evaluate(() => window.__kit.rerender())
+  expect(await page.evaluate(() => window.__kit.renders())).toBeGreaterThanOrEqual(renders + 3) // KitPlayer did re-render
+  // Leave the active set first: the scheduler only emits on change, so a stale `kit.active` cannot pass for a cue.
+  expect(await cueIds(page, 0)).toEqual([])
+  expect(await cueIds(page, 2)).toEqual(['0:c1'])
+})
+
+test('the ref handed to renderControls is stable across position ticks and onTracks', async ({ page }) => {
+  await routeStream(page)
+  await page.goto('/player.html')
+  await waitForTracks(page) // onTracks → setTracks → a re-render; api must not follow `tracks`
+  await page.evaluate(() => window.__kit.play())
+  await expect.poll(() => page.evaluate(() => window.__kit.positionTicks), { timeout: 5_000 }).toBeGreaterThanOrEqual(3)
+  // Each timeupdate → setPosition → a re-render of KitPlayer, so the assertion below is not vacuous.
+  expect(await page.evaluate(() => window.__kit.renders())).toBeGreaterThanOrEqual(4)
+  expect(await page.evaluate(() => window.__kit.refIdentities())).toBe(1)
 })

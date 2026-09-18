@@ -3,7 +3,7 @@ import { URL, fileURLToPath } from 'node:url' // node's URL, so fileURLToPath ac
 import { CueScheduler, parseVtt } from '../src/core'
 import type { Cue, TextKind, TextTrack } from '../src/core'
 import type { TextPreference } from '../src/player/selection'
-import { acceptsTextTrackData, applyTextSelection, autoSelectedTextIds } from '../src/player/selection'
+import { acceptsTextTrackData, applyTextSelection, autoSelectedTextIds, sourceChanged } from '../src/player/selection'
 
 /**
  * NOTE ON WHAT THESE TESTS COVER. `harness()` below re-implements KitPlayer's `selectText`,
@@ -30,6 +30,8 @@ function harness() {
   const scheduler = new CueScheduler((active: Cue[]) => emitted.push(active.map((c) => `${c.trackId}:${c.id}`)))
   let selected = new Set<string>()
   let position = 0 // stands in for adapterRef.current.getPosition()
+  let appliedPrefs = false // the preferredAudio/preferredText latch
+  let liveUri = 'A' // KitPlayer's liveUri ref: the source the per-source state belongs to
 
   const selectText = (ids: string[]) => {
     const next = applyTextSelection(ids, scheduler.tracks)
@@ -43,14 +45,35 @@ function harness() {
    * than a copy of it, so the auto-selection tests below exercise the code KitPlayer actually runs.
    */
   const handleTracks = (text: TextTrack[], preferredText?: TextPreference) => {
+    if (appliedPrefs) return
+    appliedPrefs = true
     const tx = autoSelectedTextIds(text, preferredText)
     if (tx.length) selectText(tx)
   }
-  /** handleTextTrackData; returns whether the VTT was accepted rather than dropped. */
-  const handleTextTrackData = (trackId: string, text: string) => {
-    if (!acceptsTextTrackData(selected, trackId)) return false
+  /**
+   * handleTextTrackData; returns whether the VTT was accepted rather than dropped. `requestedFor` models the
+   * `sourceUri` the real handler closed over when the adapter captured it at `selectText` time; it defaults
+   * to the live source, which is what every delivery that is not a late fetch looks like.
+   */
+  const handleTextTrackData = (trackId: string, text: string, requestedFor = liveUri) => {
+    if (!acceptsTextTrackData(selected, trackId, requestedFor, liveUri)) return false
     scheduler.setTrack(trackId, parseVtt(vtt(text), { trackId }))
     return true
+  }
+  /** A fetch started now that resolves later: a thunk bound to the *current* source, to be invoked after changeSource. */
+  const deliverLater = (trackId: string, text: string) => {
+    const requestedFor = liveUri
+    return () => handleTextTrackData(trackId, text, requestedFor)
+  }
+  /** The source-change layout effect (docs/decisions/0005 §2), mirrored verbatim. Must never call the adapter. */
+  const changeSource = (uri: string, startAt = 0) => {
+    if (!sourceChanged({ uri: liveUri }, { uri })) return
+    liveUri = uri
+    selected = applyTextSelection([], scheduler.tracks).selected // refuse VTT first
+    appliedPrefs = false // the next onTracks re-applies preferredAudio/preferredText
+    for (const t of scheduler.tracks) scheduler.removeTrack(t)
+    scheduler.update(startAt) // removeTrack never notifies; this emits onCue([]) iff cues were on screen
+    position = startAt
   }
   /** handlePosition: the adapter's position advances and the scheduler re-evaluates. */
   const tick = (s: number) => {
@@ -58,8 +81,9 @@ function harness() {
     scheduler.update(s)
   }
   return {
-    emitted, adapterCalls, scheduler, selectText, handleTracks, handleTextTrackData, tick,
+    emitted, adapterCalls, scheduler, selectText, handleTracks, handleTextTrackData, deliverLater, changeSource, tick,
     selectedIds: () => [...selected].sort(),
+    position: () => position,
   }
 }
 
@@ -167,6 +191,113 @@ describe('text selection state', () => {
     expect(prune).toEqual(['de'])
     expect(schedulerTracks).toEqual(['de', 'en'])
   })
+
+  it('a source change clears the selected set and every scheduler track without calling the adapter', () => {
+    const h = harness()
+    h.selectText(['0', '1'])
+    for (const id of ['0', '1']) h.handleTextTrackData(id, id)
+    expect(h.scheduler.tracks.sort()).toEqual(['0', '1'])
+    const calls = h.adapterCalls.length
+    h.changeSource('B')
+    expect(h.selectedIds()).toEqual([])
+    expect(h.scheduler.tracks).toEqual([])
+    // The adapter is reloading anyway; a selectText([]) would race the load (KIT-009 source guard stands).
+    expect(h.adapterCalls).toHaveLength(calls)
+  })
+
+  it('a source change emits onCue([]) once when cues were on screen, and nothing when none were', () => {
+    const h = harness()
+    h.selectText(['0', '1'])
+    for (const id of ['0', '1']) h.handleTextTrackData(id, id)
+    h.tick(2)
+    expect(h.emitted.at(-1)).toEqual(['0:c1', '1:c1'])
+    const before = h.emitted.length
+    h.changeSource('B')
+    expect(h.emitted.length).toBe(before + 1)
+    expect(h.emitted.at(-1)).toEqual([])
+
+    // Tracks loaded but nothing active (position 0 is before the first cue): no emission to make.
+    const quiet = harness()
+    quiet.selectText(['0'])
+    quiet.handleTextTrackData('0', 'x')
+    expect(quiet.emitted).toEqual([])
+    quiet.changeSource('B')
+    expect(quiet.emitted).toEqual([])
+  })
+
+  it('a source change re-applies preferredText on the next onTracks even when the ids collide', () => {
+    const h = harness()
+    h.handleTracks([track('0', 'de')], { languages: ['de'] })
+    expect(h.selectedIds()).toEqual(['0'])
+    h.changeSource('B')
+    // Ids are ordinals (0004), so the new source's German is '1' and its '0' is something else.
+    h.handleTracks([track('0', 'en'), track('1', 'de')], { languages: ['de'] })
+    expect(h.selectedIds()).toEqual(['1'])
+    expect(h.adapterCalls).toEqual([['0'], ['1']])
+  })
+
+  it('VTT requested for the previous source is dropped, even when the new source selected the same id', () => {
+    const h = harness()
+    h.selectText(['0'])
+    const late = h.deliverLater('0', 'Alt') // the fetch for A's '0' is in flight
+    h.changeSource('B')
+    h.handleTracks([track('0', 'de')], { languages: ['de'] }) // B selects '0' again
+    expect(h.selectedIds()).toEqual(['0'])
+    expect(late()).toBe(false) // A's fetch resolves: selected, but not for the live source
+    expect(h.scheduler.tracks).toEqual([])
+    expect(h.handleTextTrackData('0', 'Neu')).toBe(true) // B's own fetch lands
+    expect(h.scheduler.tracks).toEqual(['0'])
+  })
+
+  it('a same-uri re-render is not a source change: selection and cues survive', () => {
+    const h = harness()
+    h.selectText(['0', '1'])
+    for (const id of ['0', '1']) h.handleTextTrackData(id, id)
+    h.tick(2)
+    const emissions = h.emitted.length
+    h.changeSource('A') // every consumer builds `source` inline, so this happens on every render
+    expect(h.selectedIds()).toEqual(['0', '1'])
+    expect(h.scheduler.tracks.sort()).toEqual(['0', '1'])
+    expect(h.emitted.length).toBe(emissions)
+  })
+
+  it('a source change moves the kit position to startAt, or 0, until the adapter reports', () => {
+    const h = harness()
+    h.tick(40)
+    expect(h.position()).toBe(40)
+    h.changeSource('B', 12)
+    expect(h.position()).toBe(12)
+    h.changeSource('C')
+    expect(h.position()).toBe(0)
+  })
+})
+
+describe('sourceChanged', () => {
+  it('is a change only when uri differs', () => {
+    expect(sourceChanged({ uri: 'A' }, { uri: 'B' })).toBe(true)
+    expect(sourceChanged({ uri: 'A' }, { uri: 'A' })).toBe(false)
+  })
+
+  it('ignores type and headers: a headers-only or type-only change is not a source change', () => {
+    // A refreshing Authorization header must not clear captions on every refresh (0005 §1). Structural
+    // typing accepts the extra fields (on variables, not fresh literals); the function must not look at them.
+    const a = { uri: 'A', type: 'hls', headers: { Authorization: 'Bearer one' } }
+    const refreshedHeaders = { uri: 'A', type: 'hls', headers: { Authorization: 'Bearer two' } }
+    const otherType = { uri: 'A', type: 'dash', headers: a.headers }
+    expect(sourceChanged(a, refreshedHeaders)).toBe(false)
+    expect(sourceChanged(a, otherType)).toBe(false)
+    expect(sourceChanged(a, { uri: 'A' })).toBe(false)
+  })
+})
+
+describe('acceptsTextTrackData', () => {
+  it('accepts only a selected track requested for the live source', () => {
+    const selected = new Set(['0'])
+    expect(acceptsTextTrackData(selected, '0', 'A', 'A')).toBe(true)
+    expect(acceptsTextTrackData(selected, '0', 'A', 'B')).toBe(false) // selected, but fetched for the previous source
+    expect(acceptsTextTrackData(selected, '1', 'A', 'A')).toBe(false) // live source, but not selected
+    expect(acceptsTextTrackData(selected, '1', 'A', 'B')).toBe(false)
+  })
 })
 
 /**
@@ -227,5 +358,17 @@ describe('KitPlayer wiring', () => {
     // handed no preference) again.
     expect(src.match(/autoSelectedTextIds\(/g)).toHaveLength(1)
     expect(src).not.toMatch(/\bpickText\b/)
+  })
+
+  it('resets per-source state in a layout effect keyed on source.uri, not a passive effect', () => {
+    const src = readFileSync(fileURLToPath(new URL('../src/player/KitPlayer.tsx', import.meta.url)), 'utf8')
+    // Pins the mechanism of docs/decisions/0005 §6, which the harness above cannot see. React runs every
+    // layout effect of a commit before any passive effect of that commit, so a layout effect is what puts
+    // the reset ahead of the adapters' own `useEffect` on `source.uri`. A passive effect runs after the
+    // adapters' load effects (children first) and can wipe a `preferredText` the new source had already
+    // applied. `sourceChanged` is the single place the identity rule lives, so it is called exactly once.
+    expect(src.match(/useLayoutEffect\(/g)).toHaveLength(1)
+    expect(src.match(/sourceChanged\(/g)).toHaveLength(1)
+    expect(src).not.toMatch(/\buseEffect\(/)
   })
 })

@@ -1,10 +1,10 @@
-import React, { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import React, { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Platform } from 'react-native'
 import { CueScheduler, parseVtt, pickAudio } from '../core'
 import type { Cue, PlayerState, Tracks } from '../core'
 import type { KitPlayerProps, KitPlayerRef } from './types'
 import { resolveAdapter } from './adapters'
-import { acceptsTextTrackData, applyTextSelection, autoSelectedTextIds } from './selection'
+import { acceptsTextTrackData, applyTextSelection, autoSelectedTextIds, sourceChanged } from './selection'
 
 /**
  * KitPlayer: one component, one ref, one cue model — on Fire OS (ExoPlayer), Vega (w3cmedia + Shaka) and web.
@@ -19,8 +19,25 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
   const [tracks, setTracks] = useState<Tracks>({ audio: [], text: [] })
   const selectedText = useRef<Set<string>>(new Set())
   const appliedPrefs = useRef(false)
+  /** The source the kit's per-source state (selection, latch, scheduler tracks) currently belongs to. */
+  const liveUri = useRef(props.source.uri)
+  const sourceUri = props.source.uri
 
-  const scheduler = useMemo(() => new CueScheduler((active: Cue[]) => props.onCue?.(active)), [props.onCue])
+  /**
+   * Latest-props refs. `onCue` is read through a ref so the scheduler is constructed exactly once: keyed on
+   * `props.onCue` it was rebuilt for every inline `onCue={(c) => ...}`, dropping every loaded track (KIT-012).
+   * `position`/`tracks` are mirrored so `api` can answer `getPosition`/`getTracks` without closing over state —
+   * otherwise `useImperativeHandle` and `renderControls` received a new `ref` on every position tick.
+   */
+  const onCueRef = useRef(props.onCue)
+  onCueRef.current = props.onCue
+  const positionRef = useRef(0)
+  const tracksRef = useRef<Tracks>({ audio: [], text: [] })
+  // Lazy `useRef` rather than `useMemo(..., [])`: React documents `useMemo` as a cache it may discard, and a
+  // discarded scheduler is exactly the defect above — its tracks are state, not a recomputable value.
+  const schedulerRef = useRef<CueScheduler | null>(null)
+  if (schedulerRef.current === null) schedulerRef.current = new CueScheduler((active: Cue[]) => onCueRef.current?.(active))
+  const scheduler = schedulerRef.current
 
   /**
    * The one text-selection transition: selected set → prune scheduler tracks → adapter.
@@ -42,6 +59,7 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
 
   const handleTracks = useCallback(
     (t: Tracks) => {
+      tracksRef.current = t
       setTracks(t)
       props.onTracks?.(t)
       if (!appliedPrefs.current && adapterRef.current) {
@@ -60,6 +78,7 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
 
   const handlePosition = useCallback(
     (s: number) => {
+      positionRef.current = s
       setPosition(s)
       props.onPosition?.(s)
       scheduler.update(s)
@@ -75,14 +94,44 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
     [props.onState],
   )
 
-  /** Adapters that cannot emit cues push raw VTT here; adapters that can call onCue directly and never call this. */
+  /**
+   * Adapters that cannot emit cues push raw VTT here; adapters that can call onCue directly and never call this.
+   * Re-created per `source.uri` on purpose: an adapter's `selectText` calls the `onTextTrackData` it captured when
+   * it was invoked, so VTT fetched for a previous source arrives through a previous handler and `sourceUri` is
+   * that source — not the live one — and the VTT is refused even when the new source selected the same id.
+   * Adapter contract: call the `onTextTrackData` you were handed at `selectText` time; never read it through a
+   * latest-props ref.
+   */
   const handleTextTrackData = useCallback(
     (trackId: string, vtt: string) => {
-      if (!acceptsTextTrackData(selectedText.current, trackId)) return
+      if (!acceptsTextTrackData(selectedText.current, trackId, sourceUri, liveUri.current)) return
       scheduler.setTrack(trackId, parseVtt(vtt, { trackId }))
     },
-    [scheduler],
+    [scheduler, sourceUri],
   )
+
+  /**
+   * A source change resets what the kit owns for a source, before the adapter reloads (docs/decisions/0005).
+   * Layout effect, not passive: React runs every layout effect of a commit before any passive effect of that
+   * commit, so this precedes the adapters' own `useEffect` on `source.uri` regardless of how they emit. A
+   * passive effect would run after the adapter's (children first) and could wipe a `preferredText` the new
+   * source had already applied. Compares against `liveUri` rather than trusting "the effect ran", so it is a
+   * no-op on first mount and under StrictMode's double invocation.
+   */
+  useLayoutEffect(() => {
+    if (!sourceChanged({ uri: liveUri.current }, props.source)) return
+    liveUri.current = props.source.uri
+    const start = props.startAt ?? 0
+    selectedText.current = applyTextSelection([], scheduler.tracks).selected // refuse VTT first
+    appliedPrefs.current = false // the new source's first onTracks re-applies preferredAudio/preferredText
+    for (const t of scheduler.tracks) scheduler.removeTrack(t) // the getter copies, so removing while iterating is safe
+    scheduler.update(start) // removeTrack never notifies; this emits onCue([]) iff cues were on screen
+    setTracks({ audio: [], text: [] }) // renderControls must not show the previous source's tracks
+    tracksRef.current = { audio: [], text: [] }
+    setPosition(start)
+    positionRef.current = start
+    // The adapter is not told selectText([]): it is reloading, and the deselect would race the load.
+  }, [sourceUri]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const api: KitPlayerRef = useMemo(
     () => ({
@@ -95,10 +144,10 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
       setRate: (r) => adapterRef.current?.setRate(r),
       selectAudio: (id) => adapterRef.current?.selectAudio(id),
       selectText,
-      getPosition: () => adapterRef.current?.getPosition() ?? position,
-      getTracks: () => adapterRef.current?.getTracks() ?? tracks,
+      getPosition: () => adapterRef.current?.getPosition() ?? positionRef.current,
+      getTracks: () => adapterRef.current?.getTracks() ?? tracksRef.current,
     }),
-    [position, tracks, scheduler, selectText],
+    [scheduler, selectText], // both stable, so `api` is created once and `renderControls`' `ref` never changes
   )
   useImperativeHandle(ref, () => api, [api])
 

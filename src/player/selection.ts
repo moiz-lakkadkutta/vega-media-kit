@@ -20,9 +20,28 @@ export function applyTextSelection(trackIds: readonly string[], schedulerTracks:
   return { selected, prune: schedulerTracks.filter((t) => !selected.has(t)) }
 }
 
-/** The gate on fetched VTT: cues for a track that is not selected never reach the scheduler. */
-export function acceptsTextTrackData(selected: ReadonlySet<string>, trackId: string): boolean {
-  return selected.has(trackId)
+/**
+ * Whether a `source` prop change is a source change. Matches what makes every adapter reload — `uri`, and
+ * only `uri` (web.tsx / vega.tsx key their load effect on it; fireos passes it to <Video>). `headers` must
+ * not count: a refreshing auth header would clear captions on every refresh. Structural parameter, not
+ * `KitSource`, so this module stays independent of the React prop types (same reason as `TextPreference`).
+ */
+export function sourceChanged(prev: { uri: string }, next: { uri: string }): boolean {
+  return prev.uri !== next.uri
+}
+
+/**
+ * The gate on fetched VTT. Cues reach the scheduler only when the track is selected AND the VTT was
+ * requested for the source that is live now. Selection alone is not enough: text ids are ordinals, so
+ * the next source selects '0' again before the previous source's fetch for '0' resolves.
+ */
+export function acceptsTextTrackData(
+  selected: ReadonlySet<string>,
+  trackId: string,
+  requestedFor: string,
+  live: string,
+): boolean {
+  return requestedFor === live && selected.has(trackId)
 }
 
 /** The `preferredText` prop's shape, mirrored here so this module stays independent of the React prop types. */

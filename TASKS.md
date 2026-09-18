@@ -18,6 +18,8 @@ release notes in waiting.
 | 2026-09-18 | `935e079` | `feat(platform)`: `mapKey` learns Vega `TVEventHandler` names (human, parallel session) | 47 |
 | 2026-09-18 | `9ed3249` | **KIT-002/003/004** — HLS master-playlist parsing; `x-kit-text-urls` deprecated (decision 0004) | 112 |
 | 2026-09-18 | `ff7eac1` `d280dfa` | **KIT-005** — web `.m3u8` subtitles via `fetchHlsVtt` (plan Q7); Playwright harness (`harness/`, 16 specs) + CI job `harness`; two web structural guards retired | 110 + 16 |
+| 2026-09-18 | `d36b2bc` | **KIT-008** — README/getting-started match HEAD (`'kepler'`, rewrite not rename, manifest text tracks); four changesets → `release-0-1-0.md` | 110 + 16 |
+| 2026-09-18 | _pending_ | **KIT-011** — reset on `source.uri` change (decision 0005) · **KIT-012** — scheduler built once, `api` stable | 120 + 20 |
 
 CI is green on every commit above (`d280dfa`: both `test` and the new `harness` job). `main` == `origin/main` at `d280dfa`.
 
@@ -30,18 +32,21 @@ CI is green on every commit above (`d280dfa`: both `test` and the new `harness` 
 | KIT-009 | `preferredText` auto-selection never delivered cues | Implementer (opus) → Reviewer (fable) → Implementer (opus) ×2 | **done** `ad47f96` |
 | KIT-013 | Web adapter labelled every text track `subtitles` | — | **closed** by KIT-002/003/004 for manifest tracks |
 | KIT-005 | Playwright harness for `CueOverlay` via the web adapter + CI job | Planner (opus*) → Implementer (opus) → Reviewer (opus*) → Implementer (opus) | **done** `ff7eac1` `d280dfa` |
-| KIT-008 | `docs/getting-started.md` + README to match the spike; changeset for 0.1.0 | Scribe (opus) | not started |
+| KIT-008 | `docs/getting-started.md` + README to match the spike; changeset for 0.1.0 | Scribe (opus) ×2 | **done** `d36b2bc` |
 | KIT-014 | `preferredText={{}}` / `{ languages: undefined }` selects every text track | Planner (fable) → Implementer (opus) | not started — **needs a human decision** |
-| KIT-011 | `selectedText` / `appliedPrefs` / scheduler never reset on `source` change | Planner (fable) → Implementer (opus) | not started |
-| KIT-012 | Scheduler rebuilt on `onCue` identity change; `api` rebuilt every position tick | Implementer (opus) | not started |
+| KIT-011 | `selectedText` / `appliedPrefs` / scheduler never reset on `source` change | Planner (opus*) → Implementer (opus) ×2 → Reviewer (opus*) | **done** (decision 0005) |
+| KIT-012 | Scheduler rebuilt on `onCue` identity change; `api` rebuilt every position tick | Implementer (opus) → Reviewer (opus*, shared with KIT-011) | **done** |
 | KIT-015 | `onTracks` before `onState('ready')` as a kit-wide contract (web: emit `ready` from the join; Vega: publish before `ready`); then assert order in harness spec 11 | Planner → Implementer | not started (from KIT-005 review) |
 | KIT-016 | Web `selectText` failures unobservable: `fetchHlsVtt` never checks `res.ok`, non-VTT body triggers per-line fetches, rejected promise discarded at `KitPlayer.tsx:38` → route through `onError` | Implementer (opus) | not started (from KIT-005 review) |
 | KIT-017 | `CueOverlay`: selectable primary cue skips `numberOfLines={2}`; migrate `accessibilityLabel`/`accessibilityRole`/`pointerEvents` to `aria-label`/`role`/`style.pointerEvents` | Implementer (opus) | not started (from KIT-005 review) |
+| KIT-019 | **Before 0.1.0.** Web adapter load effect has no cleanup: five element listeners re-added per `source.uri` change (`state` reads `ready, ready, …`, `timeupdate` doubles) and a stale `Promise.all` publishes source A's `onTracks` after a quick switch to B, latching `appliedPrefs` on A (decision 0005 §3 amendment). Fix: cleanup with `cancelled` flag + `removeEventListener`; consider a kit-side origin gate on `handleTracks` for web/vega closures | Implementer (opus) → Reviewer | not started (from KIT-011 review, medium) |
+| KIT-020 | Adapters keep the previous source's `tracks` ref until the new `onTracks` (`web.tsx:13`, `vega.tsx:21`, `fireos.tsx:25`); fireos `audioIndex` survives a switch (`fireos.tsx:23`) | Implementer (opus) | not started (from KIT-011) |
+| KIT-021 | `CueScheduler.setTrack` with the same cue ids but different text emits no change (`scheduler.ts:48`) — stale text after a same-id re-fetch or live refresh | Implementer (opus) | not started (from KIT-011 review) |
 | KIT-018 | Vega platform bindings are *silent* no-ops: every `if (isVega()) return` precedes `warnOnce` (`mediaControls.ts:15`, `contentLauncher.ts:28`, `personalization.ts:8,16`, `parentalControls.ts:8`) — violates "every no-op warns once with a doc link" until KIT-007 lands | Implementer (opus) | not started (from KIT-008) |
 | KIT-007 | Vega platform bindings (Content Launcher, Personalization, Media Controls, Parental Controls) | Spike → Planner → Implementer | blocked on device evidence |
 | KIT-010 | Rewrite the Vega adapter onto `VideoPlayer` class + `KeplerVideoSurfaceView` | Planner (fable) → Implementer (opus) → Reviewer (fable) | blocked on device evidence |
 
-`KIT-006` is not described in `docs/KICKOFF.md` and is left unlisted rather than invented. `KIT-009`–`KIT-018`
+`KIT-006` is not described in `docs/KICKOFF.md` and is left unlisted rather than invented. `KIT-009`–`KIT-021`
 were opened by the orchestrator from review findings; renumber if they collide with the human's numbering.
 
 **Gates.** `docs/decisions/0001-week0-gates.md` does not exist. No gate has been recorded, so every ticket is
@@ -57,7 +62,9 @@ treated as gate-open. Recording the Sept 17 gate is the human's (ORCHESTRATOR §
    `hls_characteristics=public.accessibility.describes-video` to the descriptions stream in
    `packages/pipeline/src/steps/09-package.ts`; `selectAudio('audio_ad')` at `Player.tsx:58` has the same
    id-mismatch class. Not yet written up in that repo.
-4. **The runbook has not been run.** All 21 cells of `docs/device-matrix.md` are unticked. KIT-007 and
+4. **Decision 0005** (what a `source` change resets) was taken by the orchestrator under §3.2 with no public
+   type change; veto before 0.1.0 if the apps need different semantics.
+5. **The runbook has not been run.** All 21 cells of `docs/device-matrix.md` are unticked. KIT-007 and
    KIT-010 cannot start until they are; the `vega.tsx:77` cue-delivery decision stays open.
 
 ## Follow-ups not yet ticketed
@@ -142,6 +149,38 @@ guard was a no-op (medium) — fixed with red evidence before commit.
 
 **Routing deviation:** Fable returned HTTP 429 ("reached your Fable limit") for both the Planner and the
 Reviewer; both ran on Opus (marked `opus*` in the table). Re-route to Fable when quota returns.
+
+### KIT-011 — reset on `source.uri` change · KIT-012 — stable scheduler and `api`
+
+**Decision 0005:** a source change is a change of `source.uri` only (adapters reload on `uri` and only
+`uri`; a refreshed auth header must not clear captions). Reset order: `selectedText` → ∅, `appliedPrefs` →
+false, prune every scheduler track, `scheduler.update(startAt ?? 0)` (emits `onCue([])` iff cues were on
+screen), `tracks` → empty, `position` → `startAt ?? 0`. The adapter is not told `selectText([])`; no
+synthetic `onTracks`. Mechanism: `useLayoutEffect` keyed on `source.uri` — every layout effect of a commit
+runs before any passive effect, so the reset precedes the adapters' `useEffect` on `source.uri` by React
+phase ordering, not by the (true today) observation that adapters emit asynchronously. The `selectedText`
+gate alone was not enough: ids are ordinals, so the new source selects `'0'` before the old fetch for `'0'`
+resolves. `acceptsTextTrackData` now also requires the VTT to have been requested for the live uri —
+`handleTextTrackData` is re-created per `source.uri` and adapters call the handler captured at
+`selectText` time (contract now in `AdapterProps.onTextTrackData` JSDoc).
+
+**The mirror gap, again.** Orchestrator's mutation — deleting `appliedPrefs.current = false` from the real
+`KitPlayer` — passed all 120 vitest + 16 harness specs; the `selection.test.ts` mirror guards a copy of the
+logic. Harness specs 17 (switch clears cues, re-applies `preferredText`, B's text never A's) and 18 (the
+race, made deterministic by holding one of A's segments) were folded in and are the guards of record: both
+go red on the real-component mutations; 18 also catches the origin-token mutant. Structural guard for
+`useLayoutEffect` kept — a `useEffect` regression passes 17/18 because web emits asynchronously.
+
+**KIT-012:** scheduler built once via lazy `useRef` with an `onCueRef` (a `useMemo` cache may be discarded,
+and a discarded scheduler is exactly the defect); `positionRef`/`tracksRef` mirror state so `api` deps are
+`[scheduler, selectText]` and the ref object is created once; `renderControls` still gets live state.
+Harness `?inlineCallbacks=1` mode; specs 19/20 red on the pre-fix code and on the re-introduced deps.
+Orchestrator mutation (rebuild scheduler every render) → 9/20 red.
+
+Reviewer (opus, Fable 429 again): SHIP both. Medium finding — the stale-`onTracks` race in the web adapter's
+uncleaned load effect — is KIT-019, due before 0.1.0; 0005 §3 amended. Vega scaffold cues bypass the
+scheduler (`vega.tsx:101-115` writes `props.onCue` directly) so 0005 §2.3 cannot clear them — a note for the
+KIT-010 plan: route Vega text through `onTextTrackData`.
 
 ## Open tickets — detail
 
