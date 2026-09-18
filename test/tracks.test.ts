@@ -14,6 +14,20 @@ describe('tracks', () => {
     const t = fromShakaText([{ id: 5, language: 'de', kind: 'subtitle', active: false }, { id: 6, language: 'en', roles: ['description'], active: false }])
     expect(t.map((x) => x.kind)).toEqual(['subtitles', 'descriptions'])
   })
+  it('maps HLS accessibility CHARACTERISTICS roles to text kinds', () => {
+    const t = fromShakaText([
+      { id: 1, language: 'en', roles: ['public.accessibility.describes-video'], active: false },
+      { id: 2, language: 'en', roles: ['public.accessibility.transcribes-spoken-dialog', 'public.accessibility.describes-music-and-sound'], active: false },
+    ])
+    expect(t.map((x) => x.kind)).toEqual(['descriptions', 'captions'])
+  })
+  it('falls back to the label when a text track carries no role or kind', () => {
+    const t = fromShakaText([
+      { id: 1, language: 'en', label: 'Description text', active: false },
+      { id: 2, language: 'en', label: 'English', active: false },
+    ])
+    expect(t.map((x) => x.kind)).toEqual(['descriptions', 'subtitles'])
+  })
   it('infers roles from ExoPlayer titles', () => {
     const a = fromRnvAudio([{ index: 0, language: 'en', title: 'English' }, { index: 1, language: 'en', title: 'English (Audio Description)' }])
     expect(a[1]!.roles).toEqual(['description'])
