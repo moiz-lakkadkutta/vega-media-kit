@@ -9,6 +9,8 @@ const keyMap: Record<string, RemoteKey> = {
   // RN TV eventType names
   select: 'select', up: 'up', down: 'down', left: 'left', right: 'right', menu: 'menu', back: 'back',
   playPause: 'playPause', play: 'play', pause: 'pause', rewind: 'rewind', fastForward: 'fastForward',
+  // Vega useTVEventHandler eventType names — https://developer.amazon.com/docs/react-native-vega/0.72/using_tveventhandler.html
+  playpause: 'playPause', skip_backward: 'rewind', skip_forward: 'fastForward',
   // Android keycodes as strings
   '4': 'back', '82': 'menu', '23': 'select', '66': 'select', '19': 'up', '20': 'down', '21': 'left', '22': 'right',
   '85': 'playPause', '126': 'play', '127': 'pause', '89': 'rewind', '90': 'fastForward',
