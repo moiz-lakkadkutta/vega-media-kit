@@ -1,4 +1,4 @@
-import { fromShakaVariants, fromShakaText, fromRnvAudio, pickAudio, pickText, normalizeRoles } from '../src/core'
+import { fromShakaVariants, fromShakaText, fromRnvAudio, pickAudio, pickText, normalizeRoles, textKindFromRoles, textKindFromLabel } from '../src/core'
 
 describe('tracks', () => {
   it('collapses Shaka variants to unique audio streams and maps description role', () => {
@@ -69,5 +69,22 @@ describe('tracks', () => {
   })
   it('defaults unknown roles to main', () => {
     expect(normalizeRoles(['weird'])).toEqual(['main'])
+  })
+  it('textKindFromRoles maps accessibility UTIs and returns undefined for unknown roles', () => {
+    expect(textKindFromRoles(['public.accessibility.describes-video'])).toBe('descriptions')
+    expect(textKindFromRoles(['public.accessibility.transcribes-spoken-dialog'])).toBe('captions')
+    expect(textKindFromRoles(['public.accessibility.describes-music-and-sound'])).toBe('captions')
+    expect(textKindFromRoles(['public.easy-to-read', 'public.accessibility.describes-video'])).toBe('descriptions')
+    expect(textKindFromRoles(['public.easy-to-read'])).toBeUndefined()
+    expect(textKindFromRoles([])).toBeUndefined()
+    expect(textKindFromRoles(undefined)).toBeUndefined()
+  })
+  it('textKindFromLabel infers descriptions and captions from titles and undefined otherwise', () => {
+    expect(textKindFromLabel('Description text')).toBe('descriptions')
+    expect(textKindFromLabel('Audiodeskription')).toBe('descriptions')
+    expect(textKindFromLabel('Rich captions')).toBe('captions')
+    expect(textKindFromLabel('SDH')).toBe('captions')
+    expect(textKindFromLabel('English')).toBeUndefined()
+    expect(textKindFromLabel('')).toBeUndefined()
   })
 })

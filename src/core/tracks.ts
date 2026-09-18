@@ -81,12 +81,17 @@ const textKindMap: Record<string, TextKind> = {
 }
 
 /** Same title heuristic as `fromRnvText`, for tracks whose manifest carries no role/kind. */
-const textKindFromLabel = (label: string): TextKind | undefined =>
+export const textKindFromLabel = (label: string): TextKind | undefined =>
   /descri|deskri/i.test(label) ? 'descriptions' : /caption|sdh/i.test(label) ? 'captions' : undefined
+
+/** First CHARACTERISTICS / Shaka role that maps to a `TextKind`, else undefined. */
+export function textKindFromRoles(roles: readonly string[] | null | undefined): TextKind | undefined {
+  return (roles ?? []).map((r) => textKindMap[r.toLowerCase()]).find(Boolean)
+}
 
 export function fromShakaText(tracks: ShakaTextTrack[]): TextTrack[] {
   return tracks.map((t) => {
-    const roleKind = (t.roles ?? []).map((r) => textKindMap[r.toLowerCase()]).find(Boolean)
+    const roleKind = textKindFromRoles(t.roles)
     const kind: TextKind = roleKind ?? textKindMap[(t.kind ?? '').toLowerCase()] ?? textKindFromLabel(t.label ?? '') ?? 'subtitles'
     return { id: String(t.id), language: t.language, label: t.label?.trim() || `${t.language || 'und'} – ${kind}`, kind, active: t.active }
   })

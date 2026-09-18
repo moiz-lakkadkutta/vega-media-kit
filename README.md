@@ -39,7 +39,7 @@ export function Player() {
 
 | Subpath | Contents |
 |---|---|
-| `core` | `Cue`, `AudioTrack`, `TextTrack` types · WebVTT parser/serializer (`<v Speaker>`, `[sounds]`, `<i>`, trailing `{k=v}` meta) · `CueScheduler` (position-driven active-cue set, seek-safe) · track normalization from Shaka and ExoPlayer · `lintCues` (Netflix Timed Text limits: 2 lines × 42 chars, 20 cps) · **no React Native imports** — runs in Node and in media pipelines |
+| `core` | `Cue`, `AudioTrack`, `TextTrack` types · WebVTT parser/serializer (`<v Speaker>`, `[sounds]`, `<i>`, trailing `{k=v}` meta) · `CueScheduler` (position-driven active-cue set, seek-safe) · track normalization from Shaka and ExoPlayer · HLS master-playlist parser (`parseHlsMaster`) · `lintCues` (Netflix Timed Text limits: 2 lines × 42 chars, 20 cps) · **no React Native imports** — runs in Node and in media pipelines |
 | `player` | `<KitPlayer>` + adapters for Fire OS, Vega, web. `selectText([...])` takes **multiple** tracks. Cues arrive from the adapter or from the kit's scheduler over fetched VTT — the app can't tell which |
 | `cues` | `<CueOverlay>` with 10-foot defaults (5 % safe zone, 44 px primary / 32 px secondary at 1080p, boxed off-white text), speaker/sound rendering, `selectable` word focus |
 | `platform` | `contentLauncher`, `personalization`, `mediaControls`, `parentalControls`, `useRemote` (typed keys, long-press). No-ops warn once with a doc link |

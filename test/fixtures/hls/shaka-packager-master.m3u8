@@ -1,0 +1,12 @@
+#EXTM3U
+## Generated with https://github.com/shaka-project/shaka-packager version v3.4.2-release
+
+#EXT-X-MEDIA:TYPE=AUDIO,URI="audio_main.m3u8",GROUP-ID="audio",LANGUAGE="en",NAME="Original",DEFAULT=YES,AUTOSELECT=YES,CHANNELS="2"
+#EXT-X-MEDIA:TYPE=AUDIO,URI="audio_ad.m3u8",GROUP-ID="audio",LANGUAGE="en",NAME="Audio description",DEFAULT=NO,AUTOSELECT=YES,CHARACTERISTICS="public.accessibility.describes-video",CHANNELS="2"
+
+#EXT-X-MEDIA:TYPE=SUBTITLES,URI="captions.m3u8",GROUP-ID="text",LANGUAGE="en",NAME="Captions",DEFAULT=YES,AUTOSELECT=YES
+#EXT-X-MEDIA:TYPE=SUBTITLES,URI="sdh.m3u8",GROUP-ID="text",LANGUAGE="en",NAME="Rich captions",DEFAULT=NO,AUTOSELECT=YES,CHARACTERISTICS="public.accessibility.transcribes-spoken-dialog,public.accessibility.describes-music-and-sound"
+#EXT-X-MEDIA:TYPE=SUBTITLES,URI="descriptions.m3u8",GROUP-ID="text",LANGUAGE="en",NAME="Description text",DEFAULT=NO,AUTOSELECT=YES,CHARACTERISTICS="public.accessibility.describes-video"
+
+#EXT-X-STREAM-INF:BANDWIDTH=3200000,AVERAGE-BANDWIDTH=2400000,CODECS="avc1.64001f,mp4a.40.2",RESOLUTION=1920x1080,FRAME-RATE=25.000,AUDIO="audio",SUBTITLES="text"
+video.m3u8
