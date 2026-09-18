@@ -7,7 +7,8 @@ import { WebAdapter } from './web'
 export type Adapter = ForwardRefExoticComponent<AdapterProps & RefAttributes<KitPlayerRef>>
 
 /**
- * Vega reports Platform.OS as 'vega' in React Native for Vega (verify in the week-0 spike; some builds report 'android').
+ * React Native for Vega reports Platform.OS as 'kepler' (decision 0002); 'vega' is accepted for forward-compatibility.
+ * 'android' is Fire OS. Anything else falls through to the web adapter.
  * Override with KIT_FORCE_ADAPTER=vega|fireos|web for testing.
  */
 export function resolveAdapter(os: string): Adapter {

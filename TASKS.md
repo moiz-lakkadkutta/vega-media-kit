@@ -17,8 +17,9 @@ release notes in waiting.
 | 2026-09-18 | `e9d83b6` | `fix(core)`: HLS accessibility `CHARACTERISTICS` → text kinds (human, parallel session) | 45 |
 | 2026-09-18 | `935e079` | `feat(platform)`: `mapKey` learns Vega `TVEventHandler` names (human, parallel session) | 47 |
 | 2026-09-18 | `9ed3249` | **KIT-002/003/004** — HLS master-playlist parsing; `x-kit-text-urls` deprecated (decision 0004) | 112 |
+| 2026-09-18 | `ff7eac1` `d280dfa` | **KIT-005** — web `.m3u8` subtitles via `fetchHlsVtt` (plan Q7); Playwright harness (`harness/`, 16 specs) + CI job `harness`; two web structural guards retired | 110 + 16 |
 
-CI is green on every commit above. `main` == `origin/main` at `9ed3249`.
+CI is green on every commit above (`d280dfa`: both `test` and the new `harness` job). `main` == `origin/main` at `d280dfa`.
 
 ## Tickets
 
@@ -28,15 +29,19 @@ CI is green on every commit above. `main` == `origin/main` at `9ed3249`.
 | KIT-002/003/004 | HLS master-playlist parsing; deprecate `x-kit-text-urls`; fixture tests | Planner (fable) → Implementer (opus) ×3 | **done** `9ed3249` |
 | KIT-009 | `preferredText` auto-selection never delivered cues | Implementer (opus) → Reviewer (fable) → Implementer (opus) ×2 | **done** `ad47f96` |
 | KIT-013 | Web adapter labelled every text track `subtitles` | — | **closed** by KIT-002/003/004 for manifest tracks |
-| KIT-005 | Playwright harness for `CueOverlay` via the web adapter + CI job | Implementer (opus) → Reviewer (fable) | not started — **recommended next** |
+| KIT-005 | Playwright harness for `CueOverlay` via the web adapter + CI job | Planner (opus*) → Implementer (opus) → Reviewer (opus*) → Implementer (opus) | **done** `ff7eac1` `d280dfa` |
 | KIT-008 | `docs/getting-started.md` + README to match the spike; changeset for 0.1.0 | Scribe (opus) | not started |
 | KIT-014 | `preferredText={{}}` / `{ languages: undefined }` selects every text track | Planner (fable) → Implementer (opus) | not started — **needs a human decision** |
 | KIT-011 | `selectedText` / `appliedPrefs` / scheduler never reset on `source` change | Planner (fable) → Implementer (opus) | not started |
 | KIT-012 | Scheduler rebuilt on `onCue` identity change; `api` rebuilt every position tick | Implementer (opus) | not started |
+| KIT-015 | `onTracks` before `onState('ready')` as a kit-wide contract (web: emit `ready` from the join; Vega: publish before `ready`); then assert order in harness spec 11 | Planner → Implementer | not started (from KIT-005 review) |
+| KIT-016 | Web `selectText` failures unobservable: `fetchHlsVtt` never checks `res.ok`, non-VTT body triggers per-line fetches, rejected promise discarded at `KitPlayer.tsx:38` → route through `onError` | Implementer (opus) | not started (from KIT-005 review) |
+| KIT-017 | `CueOverlay`: selectable primary cue skips `numberOfLines={2}`; migrate `accessibilityLabel`/`accessibilityRole`/`pointerEvents` to `aria-label`/`role`/`style.pointerEvents` | Implementer (opus) | not started (from KIT-005 review) |
+| KIT-018 | Vega platform bindings are *silent* no-ops: every `if (isVega()) return` precedes `warnOnce` (`mediaControls.ts:15`, `contentLauncher.ts:28`, `personalization.ts:8,16`, `parentalControls.ts:8`) — violates "every no-op warns once with a doc link" until KIT-007 lands | Implementer (opus) | not started (from KIT-008) |
 | KIT-007 | Vega platform bindings (Content Launcher, Personalization, Media Controls, Parental Controls) | Spike → Planner → Implementer | blocked on device evidence |
 | KIT-010 | Rewrite the Vega adapter onto `VideoPlayer` class + `KeplerVideoSurfaceView` | Planner (fable) → Implementer (opus) → Reviewer (fable) | blocked on device evidence |
 
-`KIT-006` is not described in `docs/KICKOFF.md` and is left unlisted rather than invented. `KIT-009`–`KIT-014`
+`KIT-006` is not described in `docs/KICKOFF.md` and is left unlisted rather than invented. `KIT-009`–`KIT-018`
 were opened by the orchestrator from review findings; renumber if they collide with the human's numbering.
 
 **Gates.** `docs/decisions/0001-week0-gates.md` does not exist. No gate has been recorded, so every ticket is
@@ -59,8 +64,7 @@ treated as gate-open. Recording the Sept 17 gate is the human's (ORCHESTRATOR §
 
 From `docs/plans/KIT-002-hls.md` §9: **Q4** Fire OS audio-role enrichment from `CHARACTERISTICS` · **Q5**
 `fetchHlsVtt`'s `/abs` and `../` segment resolution (now **pinned by a test** — a fix must change the pin
-deliberately) · **Q6** `FORCED` subtitles cannot be represented without a `types.ts` change · **Q7** web hands
-`.m3u8` subtitle playlists straight to the scheduler (fold into KIT-005) · **Q8** strip the deprecated header
+deliberately) · **Q6** `FORCED` subtitles cannot be represented without a `types.ts` change · **Q7** — **done** in KIT-005 (`ff7eac1`) · **Q8** strip the deprecated header
 from what react-native-video sends to the CDN now, or at removal.
 
 Unticketed: **`pnpm lint` is broken repo-wide** — ESLint 9 with no flat `eslint.config.*`, exits 2; not in
@@ -110,6 +114,34 @@ The five `adapter wiring` tests are **structural guards**: no DOM or RN test env
 shape of correct code. A behaviour-preserving refactor that changes the shape will fail them — read the
 comments and update the guard deliberately, do not delete it. If KIT-005 can assert `onTracks` ordering
 against a real `<video>`, the web guard can retire.
+
+### KIT-005 — Playwright harness + Q7
+
+`harness/`: the real `CueOverlay` and the real `KitPlayer` + `WebAdapter` under react-native-web 0.21 in
+Chromium (Vite 5, `@playwright/test`, `retries: 0`), 16 specs — nine overlay (line clamp, 42-char rule vs
+rendering, safe zone, stacking, `hideSecondary`, selectable words, prefixes, `line:top`) and seven player
+(`onTracks` ordering under test-controlled gates on the manifest and on `loadedmetadata`, late-manifest
+`preferredText`, Q7, one `selectText([two ids])` delivering both tracks, the deprecated header bridge,
+`timeupdate`). No colours, no font pinned — every text assertion is a line count (plan §1.9). CI job
+`harness`. Plan: `docs/plans/KIT-005-harness.md`.
+
+**Chromium facts the plan got wrong, recorded in plan §13:** Chrome Headless Shell 153 sniffs `.m3u8` in the
+media URL *path* before the demuxer, so no route substitution can make a `.m3u8` URL play a WebM — the
+master fixture is served at an extension-less URL (the kit parses bodies, not extensions; no adapter
+change). A plain `200` media response loads but is not seekable; the route answers `Range` with `206`.
+
+**Ruling (reviewer, recorded here):** the order of `onTracks` vs `onState('ready')` is **not** a kit contract
+today and is inconsistent — Fire OS tracks→ready, Vega ready→tracks, web race-dependent — so spec 11 does
+not assert it. It *should* become tracks→ready (an app reading `getTracks()` or calling `selectText` in
+`onState('ready')` on web today gets an empty list / a silent no-op). Ticketed as KIT-015.
+
+Retired: `'the web adapter publishes tracks only after the manifest promise resolves'` and `'the web adapter
+still adds text tracks for header ids the manifest did not produce'` (vitest 112 → 110). Orchestrator re-ran
+two mutations (Q7 revert → 4/16 red; publish-on-metadata → 6/16 red). Reviewer found spec 16's VTT-arrival
+guard was a no-op (medium) — fixed with red evidence before commit.
+
+**Routing deviation:** Fable returned HTTP 429 ("reached your Fable limit") for both the Planner and the
+Reviewer; both ran on Opus (marked `opus*` in the table). Re-route to Fable when quota returns.
 
 ## Open tickets — detail
 

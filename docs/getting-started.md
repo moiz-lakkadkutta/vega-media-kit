@@ -10,15 +10,18 @@
 1. Install the Vega SDK (macOS/Ubuntu; Apple Silicon needs Rosetta 2; ~20 GB).
 2. Create the app with `vega` CLI (React Native for Vega 0.72). Add the kit; follow `vega-video-sample`'s post-install to vendor Shaka.
 3. `vega virtual-device start` → `vega run-app build/aarch64-release/<app>.vpkg`.
-4. `Platform.OS` on Vega: verify the value in your build (`'vega'` expected); force an adapter in tests with `globalThis.KIT_FORCE_ADAPTER = 'vega'`.
+4. `Platform.OS` on Vega is `'kepler'` (Amazon's Platform reference types it `enum('kelper')` — a typo in their docs, not a second value). The kit's `resolveAdapter` and `isVega()` accept `'kepler'`, and `'vega'` for forward-compatibility; force an adapter in tests with `globalThis.KIT_FORCE_ADAPTER = 'vega'`.
 
 ## Text tracks
 
-The kit reads the HLS master playlist and builds the text-track list from `#EXT-X-MEDIA:TYPE=SUBTITLES`, so
-`TextTrack.url` is populated on Fire OS and web without the app knowing where the subtitle playlists live.
-`CHARACTERISTICS` decides `kind` (`public.accessibility.describes-video` → `descriptions`,
-`transcribes-spoken-dialog` / `describes-music-and-sound` → `captions`), falling back to the rendition's
-`NAME` and then to `subtitles`.
+This is how text tracks work on Fire OS and web, and the rewritten Vega adapter (KIT-010) is expected to
+use the same path. The kit reads the HLS master playlist and builds the text-track list from
+`#EXT-X-MEDIA:TYPE=SUBTITLES`, so `TextTrack.url` is populated on Fire OS and web without the app knowing
+where the subtitle playlists live. `CHARACTERISTICS` decides `kind` (`public.accessibility.describes-video`
+→ `descriptions`, `transcribes-spoken-dialog` / `describes-music-and-sound` → `captions`), falling back to
+the rendition's `NAME` and then to `subtitles`. On web, a rendition whose URI is a `.m3u8` subtitle media
+playlist is resolved segment-by-segment through `fetchHlsVtt` too, so it delivers cues exactly as a bare
+`.vtt` does.
 
 Select by the ids the kit reports — never by ids your app composes:
 
