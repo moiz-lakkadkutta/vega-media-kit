@@ -1,7 +1,7 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import type { TextTrack, Tracks } from '../../core'
 import type { AdapterProps, KitPlayerRef } from '../types'
-import { deprecatedTextUrls, loadHlsTextTracks } from '../hls'
+import { deprecatedTextUrls, fetchHlsVtt, loadHlsTextTracks } from '../hls'
 
 /**
  * Web adapter: HTMLVideoElement (+ Shaka when available) for the Playwright harness and Storybook.
@@ -56,7 +56,9 @@ export const WebAdapter = forwardRef<KitPlayerRef, AdapterProps>(function WebAda
     selectText: async (ids) => {
       for (const id of ids) {
         const t = tracks.current.text.find((x) => x.id === id)
-        if (t?.url) props.onTextTrackData?.(id, await (await fetch(t.url)).text())
+        // Manifest-derived urls are HLS subtitle media playlists; fetchHlsVtt joins their segments into one
+        // WebVTT body and returns a bare .vtt body (the deprecated header's usual value) unchanged (plan Q7).
+        if (t?.url) props.onTextTrackData?.(id, await fetchHlsVtt(t.url))
       }
     },
     getPosition: () => el.current?.currentTime ?? 0,
