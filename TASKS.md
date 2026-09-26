@@ -46,12 +46,17 @@ CI is green on every commit above (`test` + `harness` jobs) through `8ec1143`; a
 | KIT-023 | Fire OS stale load (`fireos.tsx:54-63, 69-88`): `onLoad` awaits the shared `hlsText.current` with no cancel; after a switch A publishes `onTracks` + a second `ready` and overwrites `textUrls.current` (:78) / `tracks.current` (:83), so B's `selectText` fetches A's playlists through B's live handler — A's captions on B, permanently. Superseded `HLS_MASTER` `onError` (:58). KIT-022 fixes the publish; the ref overwrite needs an adapter-side cancel (pair with KIT-020) | Implementer (opus) → Reviewer | not started (from KIT-019 review, **high**) |
 | KIT-024 | Vega scaffold: element listeners added per `source.uri` and never removed (`vega.tsx:42-45`; cleanup at :46 only destroys Shaka); `attach().then` has no cancel and `publishTracks` reads `player.current` not `p` (`vega.tsx:28-41, 50-55`) → can publish B's empty list and latch `appliedPrefs`; `load()` rejection after `destroy()` uncaught, live `load()` failures reach no `onError`. Fold into the KIT-010 rewrite; confirm severity on the VVD | — | open, folds into KIT-010 (from KIT-019 review, medium) |
 | KIT-025 | Web lows (pre-existing): no element `error` listener, so media failures never reach `onError` (`web.tsx:83`); `void v.play()` AbortError noise on interrupted loads (`web.tsx:57`); listeners capture `props.onState`/`onPosition` at effect time so an inline app callback is stale until the next switch — give them the KIT-012 `onCueRef` treatment (`web.tsx:48-52`, `KitPlayer.tsx:86,94`) | Implementer (opus) | not started (from KIT-019 review, low) |
+| KIT-026 | **Before 0.1.0, high.** Captions render twice on Fire OS: on the AFTSS stick every Angel One line showed twice in *both* en and fr (photo `fireos-test4-two-tracks-duplicated.jpg`). Known contributor: `fetchHlsVtt` (`src/player/hls.ts:81-89`) concatenates segments without de-duplicating cues that span a segment boundary; the fr duplicates on non-boundary lines suggest a second cause (double `selectText`/`setTrack`?) — diagnose before fixing. `CueOverlay` keys by index (`src/cues/CueOverlay.tsx:109`) so duplicates render | Planner (fable) → Implementer (opus) → Reviewer | not started (from Fire OS spike) |
+| KIT-027 | **Before 0.1.0.** `package.json` `exports` lists `import`/`require` before `react-native` (`:26-31` and every subpath); Metro takes the first matching condition in key order, so RN consumers get the stale `dist/` build whose lazy `require('react-native-video')` fails under Metro. Put `react-native` first; add a test that asserts key order | Implementer (opus) | not started (from Fire OS spike) |
+| KIT-028 | Fire OS reports `ready` after `playing`: `onLoad` awaits the manifest then calls `onState('ready')` (`fireos.tsx:85`), overwriting `playing` for the rest of playback. Folds naturally into KIT-015 (tracks→ready contract) | Implementer (opus) | not started (from Fire OS spike) |
+| KIT-029 | Fire OS `selectAudio` only sets the index (`fireos.tsx:35`); `getTracks()` keeps reporting the old audio track `active` after a switch (verified: en still active after switching to de) | Implementer (opus) | not started (from Fire OS spike) |
+| KIT-030 | `parseVtt` timestamps are float sums (`src/core/vtt.ts:26` → `3.8369999999999997`); compare with a tolerance or round to ms | Implementer (opus) | not started (from Fire OS spike, low) |
 | KIT-021 | `CueScheduler.setTrack` with the same cue ids but different text emits no change (`scheduler.ts:48`) — stale text after a same-id re-fetch or live refresh | Implementer (opus) | not started (from KIT-011 review) |
 | KIT-018 | Vega platform bindings are *silent* no-ops: every `if (isVega()) return` precedes `warnOnce` (`mediaControls.ts:15`, `contentLauncher.ts:28`, `personalization.ts:8,16`, `parentalControls.ts:8`) — violates "every no-op warns once with a doc link" until KIT-007 lands | Implementer (opus) | not started (from KIT-008) |
 | KIT-007 | Vega platform bindings (Content Launcher, Personalization, Media Controls, Parental Controls) | Spike → Planner → Implementer | blocked on device evidence |
 | KIT-010 | Rewrite the Vega adapter onto `VideoPlayer` class + `KeplerVideoSurfaceView` | Planner (fable) → Implementer (opus) → Reviewer (fable) | blocked on device evidence |
 
-`KIT-006` is not described in `docs/KICKOFF.md` and is left unlisted rather than invented. `KIT-009`–`KIT-025`
+`KIT-006` is not described in `docs/KICKOFF.md` and is left unlisted rather than invented. `KIT-009`–`KIT-030`
 were opened by the orchestrator from review findings; renumber if they collide with the human's numbering.
 
 **Gates.** `docs/decisions/0001-week0-gates.md` does not exist. No gate has been recorded, so every ticket is
@@ -69,7 +74,7 @@ treated as gate-open. Recording the Sept 17 gate is the human's (ORCHESTRATOR §
    id-mismatch class. Not yet written up in that repo.
 4. **Decision 0005** (what a `source` change resets) was taken by the orchestrator under §3.2 with no public
    type change; veto before 0.1.0 if the apps need different semantics.
-5. **The runbook has not been run.** All 21 cells of `docs/device-matrix.md` are unticked. KIT-007 and
+5. **The runbook is half run.** Fire OS column ticked 2026-09-26 (tests 1, 2, 4, 5 on the AFTSS stick; audio switch borderline at ~1 s; own-HLS row needs AWS). The Vega column is still unticked (SDK not installed). KIT-007 and
    KIT-010 cannot start until they are; the `vega.tsx:77` cue-delivery decision stays open.
 
 ## Follow-ups not yet ticketed
