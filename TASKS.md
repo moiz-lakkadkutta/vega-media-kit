@@ -22,7 +22,7 @@ release notes in waiting.
 | 2026-09-18 | `8ec1143` | **KIT-011** — reset on `source.uri` change (decision 0005) · **KIT-012** — scheduler built once, `api` stable | 120 + 20 |
 | 2026-09-26 | `da8041d` | **KIT-019** — web adapter load effect cancels on `source.uri` change: listeners removed by reference, `cancelled` gates `onTracks`/`onError` | 120 + 23 |
 
-CI is green on every commit above (`test` + `harness` jobs) through `8ec1143`; `da8041d` pushed 2026-09-26, CI pending at time of writing.
+CI is green on every commit above (`test` + `harness` jobs) through `8ec1143`; and on `da8041d` `39e637e` (2026-09-26). `main` == `origin/main`.
 
 ## Tickets
 
