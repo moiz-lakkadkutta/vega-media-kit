@@ -21,7 +21,8 @@ where the subtitle playlists live. `CHARACTERISTICS` decides `kind` (`public.acc
 → `descriptions`, `transcribes-spoken-dialog` / `describes-music-and-sound` → `captions`), falling back to
 the rendition's `NAME` and then to `subtitles`. On web, a rendition whose URI is a `.m3u8` subtitle media
 playlist is resolved segment-by-segment through `fetchHlsVtt` too, so it delivers cues exactly as a bare
-`.vtt` does.
+`.vtt` does. Wherever the kit fetches HLS subtitle playlists itself (web and Fire OS; not the Vega
+adapter), cues that a packager repeats across segment boundaries (RFC 8216 §3.5) are delivered once.
 
 Select by the ids the kit reports — never by ids your app composes:
 

@@ -161,6 +161,69 @@ export function parseVtt(input: string, opts: ParseOptions): Cue[] {
   return cues
 }
 
+/**
+ * One WebVTT body from the segments of an HLS subtitle media playlist (RFC 8216 §3.5), in playlist order.
+ * Each segment's header block (`WEBVTT`, `X-TIMESTAMP-MAP`, any other header lines) is dropped and one header
+ * is written. A cue that spans a segment boundary is, by that RFC, present in every segment it overlaps; a cue
+ * block from a later segment is therefore dropped when an earlier segment already contributed a block with
+ * the same settings and payload whose interval contains it (identifiers ignored; timestamps compared in whole
+ * milliseconds). Nothing else changes: blocks inside one segment never suppress each other, non-cue blocks
+ * (NOTE/STYLE/REGION, unparseable timings) pass through verbatim, and same-text cues at different times are
+ * kept — the kit does not merge split cues.
+ */
+export function joinVttSegments(segments: readonly string[]): string {
+  const seen = new Map<string, Array<[number, number]>>()
+  const kept: string[] = []
+  for (const segment of segments) {
+    const blocks = segment
+      .replace(/^﻿/, '')
+      .replace(/\r\n?/g, '\n')
+      .split(/\n[ \t]*\n+/)
+      .map((b) => b.trim())
+      .filter((b) => b !== '')
+    if (blocks[0]?.startsWith('WEBVTT')) {
+      // Header lines run up to the first blank line, but a packager may omit that blank line: keep a cue
+      // that directly follows the header lines (from the first `-->` line on) as an ordinary cue block.
+      const lines = blocks[0].split('\n')
+      const ti = lines.findIndex((l) => l.includes('-->'))
+      if (ti < 0) blocks.shift()
+      else blocks[0] = lines.slice(ti).join('\n')
+    }
+    const local: Array<[string, [number, number]]> = []
+    for (const block of blocks) {
+      const lines = block.split('\n')
+      const ti = lines.findIndex((l) => l.includes('-->'))
+      if (ti < 0) {
+        kept.push(block)
+        continue
+      }
+      const timing = lines[ti]!
+      const [head, tail] = timing.split('-->')
+      const start = parseTimestamp(head!)
+      const rest = tail!.trim().split(/\s+/)
+      const end = parseTimestamp(rest[0]!)
+      if (start === null || end === null) {
+        kept.push(block)
+        continue
+      }
+      const settings = rest.slice(1).join(' ')
+      const payload = lines.slice(ti + 1).join('\n').trim()
+      const key = settings + '\n' + payload
+      const s = Math.round(start * 1000)
+      const e = Math.round(end * 1000)
+      if (seen.get(key)?.some(([S, E]) => S <= s && e <= E)) continue
+      local.push([key, [s, e]])
+      kept.push(block)
+    }
+    for (const [key, interval] of local) {
+      const list = seen.get(key)
+      if (list) list.push(interval)
+      else seen.set(key, [interval])
+    }
+  }
+  return kept.length ? 'WEBVTT\n\n' + kept.join('\n\n') + '\n' : 'WEBVTT\n'
+}
+
 export function serializeVtt(cues: Cue[]): string {
   const out = ['WEBVTT', '']
   for (const c of cues) {

@@ -1,4 +1,4 @@
-import { isMasterPlaylist, parseHlsMaster, textTracksFromHls } from '../core'
+import { isMasterPlaylist, joinVttSegments, parseHlsMaster, textTracksFromHls } from '../core'
 import type { HlsMaster, TextTrack } from '../core'
 import { DEPRECATION_DOCS, deprecateOnce } from '../platform/log'
 
@@ -77,7 +77,10 @@ export function deprecatedTextUrls(headers: Record<string, string> | undefined):
   }
 }
 
-/** Resolve an HLS subtitle media playlist to concatenated WebVTT (segments joined; headers de-duplicated). */
+/**
+ * Resolve an HLS subtitle media playlist to concatenated WebVTT (segments joined; headers de-duplicated; cues
+ * repeated across segment boundaries dropped (RFC 8216 §3.5)).
+ */
 export async function fetchHlsVtt(url: string): Promise<string> {
   const res = await fetch(url)
   const body = await res.text()
@@ -85,5 +88,5 @@ export async function fetchHlsVtt(url: string): Promise<string> {
   const base = url.slice(0, url.lastIndexOf('/') + 1)
   const segs = body.split('\n').filter((l) => l && !l.startsWith('#')).map((l) => (/^https?:/.test(l) ? l : base + l))
   const parts = await Promise.all(segs.map((s) => fetch(s).then((r) => r.text())))
-  return 'WEBVTT\n\n' + parts.map((p) => p.replace(/^WEBVTT[^\n]*\n(?:X-TIMESTAMP-MAP[^\n]*\n)?/m, '')).join('\n')
+  return joinVttSegments(parts)
 }

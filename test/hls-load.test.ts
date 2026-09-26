@@ -185,13 +185,42 @@ describe('fetchHlsVtt (moved, behaviour pinned)', () => {
     const out = await fetchHlsVtt(VTT_URL)
     // Segment URLs are `base + line` — the playlist's own directory. (§9 Q5 keeps this as-is.)
     expect(seen).toEqual([VTT_URL, 'https://cdn.example/x/s1/en/0.vtt', 'https://cdn.example/x/s1/en/1.vtt'])
-    // One header for the whole body; each segment loses `WEBVTT` + its `X-TIMESTAMP-MAP` line but keeps the
-    // blank line that followed them, so every segment contributes a leading newline. Pinned, not endorsed.
-    expect(out).toBe(`WEBVTT\n\n\n${cue0}\n\n${cue1}`)
+    // One header for the whole body; each segment's header block is dropped and blocks are separated by one
+    // blank line with a trailing newline. Canonical join since KIT-026.
+    expect(out).toBe(`WEBVTT\n\n${cue0}\n\n${cue1}\n`)
     expect(out.match(/WEBVTT/g)).toHaveLength(1)
     expect(out).not.toContain('X-TIMESTAMP-MAP')
     expect(out).toContain(cue0)
     expect(out).toContain(cue1)
+  })
+
+  it('delivers a cue repeated in two consecutive segments once (KIT-026)', async () => {
+    const two = '00:00:04.000 --> 00:00:06.500\nTwo'
+    const three = '00:00:07.000 --> 00:00:09.500\nThree'
+    const four = '00:00:10.000 --> 00:00:12.500\nFour'
+    const seg = (...c: string[]) => `WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000\n\n${c.join('\n\n')}\n`
+    const bodies: Record<string, string> = {
+      [VTT_URL]: '#EXTM3U\n#EXTINF:4,\n0.vtt\n#EXTINF:4,\n1.vtt\n#EXTINF:4,\n2.vtt\n',
+      'https://cdn.example/x/s1/en/0.vtt': seg(two, three),
+      'https://cdn.example/x/s1/en/1.vtt': seg(three, four),
+      'https://cdn.example/x/s1/en/2.vtt': seg(four),
+    }
+    const seen: string[] = []
+    vi.stubGlobal('fetch', async (url: string) => {
+      seen.push(url)
+      return { text: async () => bodies[url] ?? '' }
+    })
+
+    const out = await fetchHlsVtt(VTT_URL)
+    expect((out.match(/-->/g) ?? []).length).toBe(3)
+    expect(out).toBe(`WEBVTT\n\n${two}\n\n${three}\n\n${four}\n`)
+    // The de-dupe happened after the fetch, not by skipping a segment.
+    expect(seen).toEqual([
+      VTT_URL,
+      'https://cdn.example/x/s1/en/0.vtt',
+      'https://cdn.example/x/s1/en/1.vtt',
+      'https://cdn.example/x/s1/en/2.vtt',
+    ])
   })
 
   it('leaves an absolute segment URL alone instead of prefixing the playlist directory', async () => {

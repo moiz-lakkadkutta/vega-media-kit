@@ -9,6 +9,8 @@ import { cueIds, deferred, events, routeStream } from './helpers'
  * the playback specs play the element for real. Specs 19–20 (KIT-012): an inline `onCue` must not rebuild the
  * scheduler, and the `ref` handed to `renderControls` must not change identity on position ticks or `onTracks`.
  * Specs 21–23 (KIT-019): a source switch tears down the previous load — no leaked listeners, no stale `onTracks`.
+ * Spec 24 (KIT-026): a cue repeated across HLS segment boundaries (RFC 8216 §3.5) reaches `onCue` once and the
+ * overlay draws it once, per track.
  */
 const BASE = 'http://localhost:4173'
 const trackEvents = (page: Page) => events(page).then((e) => e.filter((x) => x.type === 'tracks'))
@@ -303,4 +305,27 @@ test("a superseded load's onTracks cannot latch preferredText: A's manifest rele
   expect(t!.type === 'tracks' && t!.tracks.text).toEqual(MANIFEST_TRACKS_B)
   await expect.poll(() => cueText(page, 2)).toEqual(['Zweite Quelle']) // B's preferredText applied, B's cues
   expect(hits.some((h) => h.startsWith('fetch subs/de/'))).toBe(false)
+})
+
+test('a cue repeated across segment boundaries reaches onCue once and the overlay draws it once (KIT-026)', async ({ page }) => {
+  const hits = await routeStream(page)
+  // Encoded: a literal `/stream/` in the query would make routeStream's `**/stream/**` glob swallow the page itself.
+  await page.goto('/player.html?src=' + encodeURIComponent('/stream/master-c') + '&primary=0')
+  await waitForTracks(page)
+  await selectText(page, ['0', '1'])
+  // Class A: the verbatim repeat in seg-1/seg-2. One cue per track, one box per track, each text exactly once.
+  await expect.poll(() => cueIds(page, 8).then((ids) => ids.sort())).toEqual(['0:c3', '1:c3'])
+  const a = await page.evaluate(() => window.__kit.seekSnapshot(8))
+  expect(a.ids.sort()).toEqual(['0:c3', '1:c3'])
+  expect(a.boxes).toHaveLength(2)
+  expect(a.boxes.map((b) => b.text)).toEqual(['Spans second boundary', 'Über die zweite Grenze']) // textContent: doubled text would read "…boundarySpans second boundary"
+  // Class B: the clipped repeat in seg-0/seg-1 is one cue with the earlier start.
+  const b = await page.evaluate(() => window.__kit.seekSnapshot(5))
+  expect(b.ids.sort()).toEqual(['0:c2', '1:c2'])
+  expect(b.boxes.map((x) => x.text)).toEqual(['Spans first boundary', 'Über die erste Grenze']) // before the fix: '0:c3'/'1:c3' here
+  // Ids continue without gaps: the drop happened before parsing.
+  expect((await cueIds(page, 11)).sort()).toEqual(['0:c4', '1:c4'])
+  expect(await cueIds(page, 6.75)).toEqual([])
+  // Every segment was fetched; the de-dupe is in the join, not in what was requested.
+  for (const t of ['en', 'de']) for (const s of ['seg-0', 'seg-1', 'seg-2']) expect(hits).toContain(`fetch subs-c/${t}/${s}.vtt`)
 })
