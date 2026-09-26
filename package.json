@@ -26,39 +26,39 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "react-native": "./src/index.ts",
       "import": "./dist/index.js",
-      "require": "./dist/index.cjs",
-      "react-native": "./src/index.ts"
+      "require": "./dist/index.cjs"
     },
     "./core": {
       "types": "./dist/core/index.d.ts",
+      "react-native": "./src/core/index.ts",
       "import": "./dist/core/index.js",
-      "require": "./dist/core/index.cjs",
-      "react-native": "./src/core/index.ts"
+      "require": "./dist/core/index.cjs"
     },
     "./player": {
       "types": "./dist/player/index.d.ts",
+      "react-native": "./src/player/index.ts",
       "import": "./dist/player/index.js",
-      "require": "./dist/player/index.cjs",
-      "react-native": "./src/player/index.ts"
+      "require": "./dist/player/index.cjs"
     },
     "./cues": {
       "types": "./dist/cues/index.d.ts",
+      "react-native": "./src/cues/index.ts",
       "import": "./dist/cues/index.js",
-      "require": "./dist/cues/index.cjs",
-      "react-native": "./src/cues/index.ts"
+      "require": "./dist/cues/index.cjs"
     },
     "./platform": {
       "types": "./dist/platform/index.d.ts",
+      "react-native": "./src/platform/index.ts",
       "import": "./dist/platform/index.js",
-      "require": "./dist/platform/index.cjs",
-      "react-native": "./src/platform/index.ts"
+      "require": "./dist/platform/index.cjs"
     },
     "./focus": {
       "types": "./dist/focus/index.d.ts",
+      "react-native": "./src/focus/index.ts",
       "import": "./dist/focus/index.js",
-      "require": "./dist/focus/index.cjs",
-      "react-native": "./src/focus/index.ts"
+      "require": "./dist/focus/index.cjs"
     }
   },
   "files": [
