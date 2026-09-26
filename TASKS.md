@@ -20,8 +20,9 @@ release notes in waiting.
 | 2026-09-18 | `ff7eac1` `d280dfa` | **KIT-005** — web `.m3u8` subtitles via `fetchHlsVtt` (plan Q7); Playwright harness (`harness/`, 16 specs) + CI job `harness`; two web structural guards retired | 110 + 16 |
 | 2026-09-18 | `d36b2bc` | **KIT-008** — README/getting-started match HEAD (`'kepler'`, rewrite not rename, manifest text tracks); four changesets → `release-0-1-0.md` | 110 + 16 |
 | 2026-09-18 | `8ec1143` | **KIT-011** — reset on `source.uri` change (decision 0005) · **KIT-012** — scheduler built once, `api` stable | 120 + 20 |
+| 2026-09-26 | `da8041d` | **KIT-019** — web adapter load effect cancels on `source.uri` change: listeners removed by reference, `cancelled` gates `onTracks`/`onError` | 120 + 23 |
 
-CI is green on every commit above (`test` + `harness` jobs). `main` == `origin/main` at `8ec1143`.
+CI is green on every commit above (`test` + `harness` jobs) through `8ec1143`; `da8041d` pushed 2026-09-26, CI pending at time of writing.
 
 ## Tickets
 
@@ -39,14 +40,18 @@ CI is green on every commit above (`test` + `harness` jobs). `main` == `origin/m
 | KIT-015 | `onTracks` before `onState('ready')` as a kit-wide contract (web: emit `ready` from the join; Vega: publish before `ready`); then assert order in harness spec 11 | Planner → Implementer | not started (from KIT-005 review) |
 | KIT-016 | Web `selectText` failures unobservable: `fetchHlsVtt` never checks `res.ok`, non-VTT body triggers per-line fetches, rejected promise discarded at `KitPlayer.tsx:38` → route through `onError` | Implementer (opus) | not started (from KIT-005 review) |
 | KIT-017 | `CueOverlay`: selectable primary cue skips `numberOfLines={2}`; migrate `accessibilityLabel`/`accessibilityRole`/`pointerEvents` to `aria-label`/`role`/`style.pointerEvents` | Implementer (opus) | not started (from KIT-005 review) |
-| KIT-019 | **Before 0.1.0.** Web adapter load effect has no cleanup: five element listeners re-added per `source.uri` change (`state` reads `ready, ready, …`, `timeupdate` doubles) and a stale `Promise.all` publishes source A's `onTracks` after a quick switch to B, latching `appliedPrefs` on A (decision 0005 §3 amendment). Fix: cleanup with `cancelled` flag + `removeEventListener`; consider a kit-side origin gate on `handleTracks` for web/vega closures | Implementer (opus) → Reviewer | not started (from KIT-011 review, medium) |
+| KIT-019 | Web adapter load effect had no cleanup: listeners re-added per `source.uri` change, stale `Promise.all` published source A's `onTracks` after a switch to B | Implementer (opus) → Reviewer (fable) | **done** `da8041d` |
 | KIT-020 | Adapters keep the previous source's `tracks` ref until the new `onTracks` (`web.tsx:13`, `vega.tsx:21`, `fireos.tsx:25`); fireos `audioIndex` survives a switch (`fireos.tsx:23`) | Implementer (opus) | not started (from KIT-011) |
+| KIT-022 | **Before 0.1.0.** Kit-side origin gate on `handleTracks` (`KitPlayer.tsx:60-77`): re-create per `sourceUri`, refuse when `sourceUri !== liveUri.current`, mirroring `handleTextTrackData`. KIT-019's adapter cancel only closes the race when the source update is flushed synchronously; a DefaultLane update (setState from `setTimeout`, a promise, or `ended` auto-advance) leaves one task between the layout-effect reset and the adapter's passive cleanup, and A's VTT then passes the origin gate. Harness cannot reach it (`setSource` is `flushSync`) — needs a vitest fake-adapter test (no KitPlayer unit test exists). If it misses 0.1.0, soften the KIT-019 changeset paragraph to name the sync-update condition | Planner (fable) → Implementer (opus) → Reviewer | not started (from KIT-019 review, medium) |
+| KIT-023 | Fire OS stale load (`fireos.tsx:54-63, 69-88`): `onLoad` awaits the shared `hlsText.current` with no cancel; after a switch A publishes `onTracks` + a second `ready` and overwrites `textUrls.current` (:78) / `tracks.current` (:83), so B's `selectText` fetches A's playlists through B's live handler — A's captions on B, permanently. Superseded `HLS_MASTER` `onError` (:58). KIT-022 fixes the publish; the ref overwrite needs an adapter-side cancel (pair with KIT-020) | Implementer (opus) → Reviewer | not started (from KIT-019 review, **high**) |
+| KIT-024 | Vega scaffold: element listeners added per `source.uri` and never removed (`vega.tsx:42-45`; cleanup at :46 only destroys Shaka); `attach().then` has no cancel and `publishTracks` reads `player.current` not `p` (`vega.tsx:28-41, 50-55`) → can publish B's empty list and latch `appliedPrefs`; `load()` rejection after `destroy()` uncaught, live `load()` failures reach no `onError`. Fold into the KIT-010 rewrite; confirm severity on the VVD | — | open, folds into KIT-010 (from KIT-019 review, medium) |
+| KIT-025 | Web lows (pre-existing): no element `error` listener, so media failures never reach `onError` (`web.tsx:83`); `void v.play()` AbortError noise on interrupted loads (`web.tsx:57`); listeners capture `props.onState`/`onPosition` at effect time so an inline app callback is stale until the next switch — give them the KIT-012 `onCueRef` treatment (`web.tsx:48-52`, `KitPlayer.tsx:86,94`) | Implementer (opus) | not started (from KIT-019 review, low) |
 | KIT-021 | `CueScheduler.setTrack` with the same cue ids but different text emits no change (`scheduler.ts:48`) — stale text after a same-id re-fetch or live refresh | Implementer (opus) | not started (from KIT-011 review) |
 | KIT-018 | Vega platform bindings are *silent* no-ops: every `if (isVega()) return` precedes `warnOnce` (`mediaControls.ts:15`, `contentLauncher.ts:28`, `personalization.ts:8,16`, `parentalControls.ts:8`) — violates "every no-op warns once with a doc link" until KIT-007 lands | Implementer (opus) | not started (from KIT-008) |
 | KIT-007 | Vega platform bindings (Content Launcher, Personalization, Media Controls, Parental Controls) | Spike → Planner → Implementer | blocked on device evidence |
 | KIT-010 | Rewrite the Vega adapter onto `VideoPlayer` class + `KeplerVideoSurfaceView` | Planner (fable) → Implementer (opus) → Reviewer (fable) | blocked on device evidence |
 
-`KIT-006` is not described in `docs/KICKOFF.md` and is left unlisted rather than invented. `KIT-009`–`KIT-021`
+`KIT-006` is not described in `docs/KICKOFF.md` and is left unlisted rather than invented. `KIT-009`–`KIT-025`
 were opened by the orchestrator from review findings; renumber if they collide with the human's numbering.
 
 **Gates.** `docs/decisions/0001-week0-gates.md` does not exist. No gate has been recorded, so every ticket is
@@ -181,6 +186,17 @@ Reviewer (opus, Fable 429 again): SHIP both. Medium finding — the stale-`onTra
 uncleaned load effect — is KIT-019, due before 0.1.0; 0005 §3 amended. Vega scaffold cues bypass the
 scheduler (`vega.tsx:101-115` writes `props.onCue` directly) so 0005 §2.3 cannot clear them — a note for the
 KIT-010 plan: route Vega text through `onTextTrackData`.
+
+### KIT-019 — web adapter load cleanup
+
+The load effect in `web.tsx` now returns a cleanup: `cancelled = true` gates the `Promise.all` publish and the
+manifest `onError`, and all six listeners (including the former `{once:true}` metadata resolver, now named)
+are removed by reference. Harness specs 21 (ready once per load, one position tick per `timeupdate` across
+A→B→A), 22 (A's manifest released after B completes) and 23 (A released before B — the 0005 §3 amendment
+ordering) all fail on the unfixed code (6 vs 3 `ready`; a second `onTracks` with A's list). Orchestrator
+mutation (drop `if (cancelled) return`) → 22 and 23 red. Reviewer (Fable, quota back): SHIP; StrictMode
+double-invoke publishes once. The adapter cancel does not close the race for non-sync source updates →
+KIT-022 (before 0.1.0). Same-class defects: Fire OS (KIT-023, high), Vega scaffold (KIT-024).
 
 ## Open tickets — detail
 
