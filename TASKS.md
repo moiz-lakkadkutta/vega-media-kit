@@ -51,20 +51,20 @@ CI is green on every commit above (`test` + `harness` jobs) through `8ec1143`; a
 | KIT-028 | Fire OS reports `ready` after `playing`: `onLoad` awaits the manifest then calls `onState('ready')` (`fireos.tsx:85`), overwriting `playing` for the rest of playback. Folds naturally into KIT-015 (tracks→ready contract) | Implementer (opus) | not started (from Fire OS spike) |
 | KIT-029 | Fire OS `selectAudio` only sets the index (`fireos.tsx:35`); `getTracks()` keeps reporting the old audio track `active` after a switch (verified: en still active after switching to de) | Implementer (opus) | not started (from Fire OS spike) |
 | KIT-030 | `parseVtt` timestamps are float sums (`src/core/vtt.ts:26` → `3.8369999999999997`); compare with a tolerance or round to ms | Implementer (opus) | not started (from Fire OS spike, low) |
+| KIT-031 | README `## Status`, `docs/getting-started.md` Vega section and the 0.1.0 changeset say "Vega: experimental, not device-verified" (decision 0001) | Scribe (opus) | not started |
 | KIT-021 | `CueScheduler.setTrack` with the same cue ids but different text emits no change (`scheduler.ts:48`) — stale text after a same-id re-fetch or live refresh | Implementer (opus) | not started (from KIT-011 review) |
 | KIT-018 | Vega platform bindings are *silent* no-ops: every `if (isVega()) return` precedes `warnOnce` (`mediaControls.ts:15`, `contentLauncher.ts:28`, `personalization.ts:8,16`, `parentalControls.ts:8`) — violates "every no-op warns once with a doc link" until KIT-007 lands | Implementer (opus) | not started (from KIT-008) |
-| KIT-007 | Vega platform bindings (Content Launcher, Personalization, Media Controls, Parental Controls) | Spike → Planner → Implementer | blocked on device evidence |
-| KIT-010 | Rewrite the Vega adapter onto `VideoPlayer` class + `KeplerVideoSurfaceView` | Planner (fable) → Implementer (opus) → Reviewer (fable) | blocked on device evidence |
+| KIT-007 | Vega platform bindings (Content Launcher, Personalization, Media Controls, Parental Controls) | Spike → Planner → Implementer | **deferred** — Vega experimental (decision 0001) |
+| KIT-010 | Rewrite the Vega adapter onto `VideoPlayer` class + `KeplerVideoSurfaceView` | Planner (fable) → Implementer (opus) → Reviewer (fable) | **deferred** — Vega experimental (decision 0001) |
 
-`KIT-006` is not described in `docs/KICKOFF.md` and is left unlisted rather than invented. `KIT-009`–`KIT-030`
+`KIT-006` is not described in `docs/KICKOFF.md` and is left unlisted rather than invented. `KIT-009`–`KIT-031`
 were opened by the orchestrator from review findings; renumber if they collide with the human's numbering.
 
-**Gates.** `docs/decisions/0001-week0-gates.md` does not exist. No gate has been recorded, so every ticket is
-treated as gate-open. Recording the Sept 17 gate is the human's (ORCHESTRATOR §6).
+**Gates.** Recorded 2026-09-26 in `docs/decisions/0001-week0-gates.md`: Gate A pass on Fire OS (Vega not run); Gate B → **Fire OS primary, Vega experimental** (human); Gate C lives in `described`. KIT-007/KIT-010 deferred.
 
 ## Waiting on the human
 
-1. **The `0001` gate** — never recorded. Raised 2026-09-15 and again 2026-09-18.
+1. ~~The `0001` gate~~ — recorded 2026-09-26 (decision 0001).
 2. **KIT-014** — should `preferredText={{}}` mean "nothing" (like an omitted prop) or "every track" (like an
    omitted key)? Pinned by a test marked *PINNED, NOT ENDORSED* until decided.
 3. **`described` migration** — app ticket, not kit work (decided 2026-09-18). Content is in decision 0004:
