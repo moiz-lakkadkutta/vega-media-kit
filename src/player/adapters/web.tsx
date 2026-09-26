@@ -15,16 +15,22 @@ export const WebAdapter = forwardRef<KitPlayerRef, AdapterProps>(function WebAda
   useEffect(() => {
     const v = el.current
     if (!v) return
+    // Everything below belongs to this load. The cleanup cancels it on the next `source.uri` (or unmount):
+    // every await re-checks `cancelled` before touching props, and every listener is removed by reference, so
+    // a superseded load neither publishes its `onTracks` over the new source's reset nor reports its events.
+    let cancelled = false
     const headerUrls = deprecatedTextUrls(props.source.headers)
     // No headers on the manifest request: this matches today's bare fetch(t.url) and avoids a CORS preflight.
     const manifest = loadHlsTextTracks(props.source.uri).catch((e) => {
-      props.onError?.({ code: 'HLS_MASTER', message: 'Could not read the master playlist', fatal: false, cause: e })
+      if (!cancelled) props.onError?.({ code: 'HLS_MASTER', message: 'Could not read the master playlist', fatal: false, cause: e })
       return [] as TextTrack[]
     })
-    const metadata = new Promise<void>((resolve) => v.addEventListener('loadedmetadata', () => resolve(), { once: true }))
+    let metadataSeen: () => void = () => {}
+    const metadata = new Promise<void>((resolve) => (metadataSeen = () => resolve()))
     // One onTracks, once both the element's metadata and the manifest are in — otherwise KitPlayer's
     // appliedPrefs would latch on a track list that is still missing the manifest tracks.
     void Promise.all([manifest, metadata]).then(([manifestText]) => {
+      if (cancelled) return
       const text: TextTrack[] = manifestText.map((t) => (headerUrls[t.id] ? { ...t, url: headerUrls[t.id] } : t))
       const known = new Set(text.map((t) => t.id))
       for (const [id, url] of Object.entries(headerUrls)) {
@@ -37,14 +43,22 @@ export const WebAdapter = forwardRef<KitPlayerRef, AdapterProps>(function WebAda
       }
       props.onTracks?.(tracks.current)
     })
+    const listeners: [keyof HTMLVideoElementEventMap, () => void][] = [
+      ['loadedmetadata', metadataSeen],
+      ['loadedmetadata', () => props.onState?.('ready')],
+      ['timeupdate', () => props.onPosition?.(v.currentTime)],
+      ['play', () => props.onState?.('playing')],
+      ['pause', () => props.onState?.('paused')],
+      ['ended', () => props.onState?.('ended')],
+    ]
+    for (const [type, fn] of listeners) v.addEventListener(type, fn)
     v.src = props.source.uri
-    v.addEventListener('loadedmetadata', () => props.onState?.('ready'))
-    v.addEventListener('timeupdate', () => props.onPosition?.(v.currentTime))
-    v.addEventListener('play', () => props.onState?.('playing'))
-    v.addEventListener('pause', () => props.onState?.('paused'))
-    v.addEventListener('ended', () => props.onState?.('ended'))
     if (props.startAt) v.currentTime = props.startAt
     if (props.autoplay) void v.play()
+    return () => {
+      cancelled = true
+      for (const [type, fn] of listeners) v.removeEventListener(type, fn)
+    }
   }, [props.source.uri]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useImperativeHandle(ref, () => ({

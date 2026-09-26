@@ -8,6 +8,7 @@ import { cueIds, deferred, events, routeStream } from './helpers'
  * header bridge and `timeupdate`. Cue timing goes through `ref.seek()` (synchronous `scheduler.update`); only
  * the playback specs play the element for real. Specs 19–20 (KIT-012): an inline `onCue` must not rebuild the
  * scheduler, and the `ref` handed to `renderControls` must not change identity on position ticks or `onTracks`.
+ * Specs 21–23 (KIT-019): a source switch tears down the previous load — no leaked listeners, no stale `onTracks`.
  */
 const BASE = 'http://localhost:4173'
 const trackEvents = (page: Page) => events(page).then((e) => e.filter((x) => x.type === 'tracks'))
@@ -213,4 +214,93 @@ test('the ref handed to renderControls is stable across position ticks and onTra
   // Each timeupdate → setPosition → a re-render of KitPlayer, so the assertion below is not vacuous.
   expect(await page.evaluate(() => window.__kit.renders())).toBeGreaterThanOrEqual(4)
   expect(await page.evaluate(() => window.__kit.refIdentities())).toBe(1)
+})
+
+// KIT-019: the web adapter's load effect must tear down the previous load — its element listeners and its
+// in-flight manifest/metadata promise — when `source.uri` changes. Before the fix, every switch added five more
+// listeners (so `ready` and `timeupdate` multiplied) and a superseded load could still publish its `onTracks`.
+const stateEvents = (page: Page, s: string) => events(page).then((e) => e.filter((x) => x.type === 'state' && x.state === s).length)
+
+test('after two source switches each load reports ready once and each timeupdate one position tick', async ({ page }) => {
+  await routeStream(page)
+  await page.goto('/player.html')
+  await waitForTracks(page)
+  expect(await stateEvents(page, 'ready')).toBe(1)
+  await setSource(page, '/stream/master-b')
+  await expect.poll(() => trackEvents(page).then((t) => t.length)).toBe(2)
+  await setSource(page, '/stream/master')
+  await expect.poll(() => trackEvents(page).then((t) => t.length)).toBe(3)
+  await page.waitForTimeout(300) // let any duplicate `ready` from a leaked listener land before counting
+  expect(await stateEvents(page, 'ready')).toBe(3) // one per load, not 1 + 2 + 3
+
+  // Count the element's own timeupdates next to the kit's onPosition calls, reset and read in one task each.
+  await page.evaluate(() => {
+    const v = document.querySelector('video')!
+    ;(window as unknown as { __tu: number }).__tu = 0
+    v.addEventListener('timeupdate', () => (window as unknown as { __tu: number }).__tu++)
+    window.__kit.positionTicks = 0
+    window.__kit.play()
+  })
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __tu: number }).__tu), { timeout: 5_000 }).toBeGreaterThanOrEqual(3)
+  const { tu, ticks } = await page.evaluate(() => {
+    document.querySelector('video')!.pause()
+    return { tu: (window as unknown as { __tu: number }).__tu, ticks: window.__kit.positionTicks }
+  })
+  expect(ticks).toBe(tu) // one onPosition per timeupdate, not three
+  // `playing` fires once per play() too — a leaked `play` listener would report it once per past load.
+  expect(await stateEvents(page, 'playing')).toBe(1)
+})
+
+test("a superseded load's onTracks never publishes: A's manifest released after B completes", async ({ page }) => {
+  // Hold A's manifest (not its media), so A's element reaches `ready` but its Promise.all is still pending.
+  const a = deferred()
+  const hits = await routeStream(page, { hold: { master: a.promise } })
+  await page.goto('/player.html?preferred=' + encodeURIComponent('{"languages":["de"]}'))
+  await expect.poll(() => hasState(page, 'ready')).toBe(true)
+  expect(hits).toContain('fetch master')
+  expect(await trackEvents(page)).toHaveLength(0)
+
+  await setSource(page, '/stream/master-b')
+  await waitForTracks(page) // B's, the only one so far
+  await expect.poll(() => cueText(page, 2)).toEqual(['Zweite Quelle'])
+
+  const released = page.waitForResponse((r) => new URL(r.url()).pathname === '/stream/master' && r.request().resourceType() === 'fetch').then((r) => r.finished())
+  a.resolve()
+  await released
+  await page.waitForTimeout(500)
+  const t = await trackEvents(page)
+  expect(t).toHaveLength(1)
+  expect(t[0]!.type === 'tracks' && t[0]!.tracks.text).toEqual(MANIFEST_TRACKS_B)
+  expect((await page.evaluate(() => window.__kit.ref!.getTracks())).text).toEqual(MANIFEST_TRACKS_B)
+  expect(await cueText(page, 9)).toEqual([]) // A's c3 would show here
+  expect(await cueText(page, 2)).toEqual(['Zweite Quelle'])
+})
+
+test("a superseded load's onTracks cannot latch preferredText: A's manifest released before B's", async ({ page }) => {
+  // The worse ordering (0005 §3 amendment): A's onTracks lands after the reset but before B's, so without the
+  // cancel the kit's appliedPrefs latches on A's list, auto-selects A's '0' and B's preferredText never applies.
+  const a = deferred()
+  const b = deferred()
+  const hits = await routeStream(page, { hold: { master: a.promise, 'master-b': b.promise } })
+  await page.goto('/player.html?preferred=' + encodeURIComponent('{"languages":["de"]}'))
+  await expect.poll(() => hasState(page, 'ready')).toBe(true)
+  expect(hits).toContain('fetch master')
+
+  await setSource(page, '/stream/master-b')
+  await expect.poll(() => hits).toContain('fetch master-b')
+  await expect.poll(() => stateEvents(page, 'ready')).toBeGreaterThanOrEqual(2) // B's metadata is in, only its manifest is held
+
+  const releasedA = page.waitForResponse((r) => new URL(r.url()).pathname === '/stream/master' && r.request().resourceType() === 'fetch').then((r) => r.finished())
+  a.resolve()
+  await releasedA
+  await page.waitForTimeout(500)
+  expect(await trackEvents(page)).toHaveLength(0) // A published nothing after the switch
+  expect(hits.filter((h) => h.startsWith('fetch subs/'))).toEqual([]) // and selected nothing of A's
+
+  b.resolve()
+  await waitForTracks(page)
+  const [t] = await trackEvents(page)
+  expect(t!.type === 'tracks' && t!.tracks.text).toEqual(MANIFEST_TRACKS_B)
+  await expect.poll(() => cueText(page, 2)).toEqual(['Zweite Quelle']) // B's preferredText applied, B's cues
+  expect(hits.some((h) => h.startsWith('fetch subs/de/'))).toBe(false)
 })

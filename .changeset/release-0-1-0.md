@@ -12,6 +12,8 @@
 
 **Web: `.m3u8` subtitle playlists resolve to cues.** The web adapter now resolves HLS subtitle media playlists through `fetchHlsVtt` before handing text to the scheduler, so manifest-derived text tracks (`#EXT-X-MEDIA:TYPE=SUBTITLES` with a `.m3u8` URI) deliver cues on web instead of none. Bare `.vtt` URLs — including entries from the deprecated `x-kit-text-urls` header — are fetched exactly as before.
 
+**Web: switching `source` no longer leaks the previous load.** The web adapter now tears down each load when `source.uri` changes or the player unmounts: its element listeners are removed, so `onState('ready')`, `onPosition` and the other state callbacks fire once per event instead of once per past source, and a load still resolving its master playlist when the source changed no longer publishes its `onTracks` afterwards — which could report the previous source's tracks, or latch `preferredText` onto them so the new source's preference was never applied. A superseded load's master-playlist error is no longer reported either.
+
 **Vega `mapKey` aliases.** `mapKey` learns the Vega `TVEventHandler` names `playpause`, `skip_backward` and `skip_forward`.
 
 **Deprecated: `source.headers['x-kit-text-urls']`.** Still honoured as an override for one release — merged by id after the manifest tracks — and warns once; removed in the next minor. Select text tracks by the ids reported in `onTracks` instead.
