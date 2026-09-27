@@ -63,8 +63,9 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
    * to the app, not latched into `appliedPrefs`, not shown in `renderControls`. Adapters publish through the
    * `onTracks` they held when the load began (web: the load effect's props; fireos: the `onLoad` closure across
    * its await), so a superseded load's report arrives here with `sourceUri` = that source. The kit does not rely
-   * on an adapter cancelling its own load: fireos has no cancel (KIT-023), and on web the cancel is closed only
-   * because the reset below schedules sync state (see the note there).
+   * on an adapter cancelling its own load: fireos cancels its own superseded loads since KIT-023, but the kit
+   * does not depend on it, and on web the cancel is closed only because the reset below schedules sync state
+   * (see the note there).
    */
   const handleTracks = useCallback(
     (t: Tracks) => {

@@ -265,32 +265,13 @@ describe('adapter wiring', () => {
     expect(src('player/index.ts')).not.toMatch(/fetchHlsVtt.*adapters\/fireos/)
   })
 
-  it('the Fire OS adapter publishes tracks only after the manifest promise is awaited', () => {
-    const s = fireos()
-    // KitPlayer's `appliedPrefs` latches on the FIRST onTracks call, so an onTracks with manifest-less
-    // tracks would permanently prevent `preferredText` from being applied (plan §4.7 step 3, R2).
-    const awaited = s.indexOf('await hlsText.current')
-    const published = s.indexOf('props.onTracks?.(')
-    expect(awaited).toBeGreaterThan(-1)
-    expect(published).toBeGreaterThan(-1)
-    expect(awaited).toBeLessThan(published)
-    expect(s.match(/props\.onTracks\?\.\(/g)).toHaveLength(1)
-  })
-
   it('no TODO(spike KIT-001) remains in the Fire OS adapter', () => {
     expect(fireos()).not.toContain('TODO(spike KIT-001)')
   })
 
-  // The guard below exists because mutation-testing this file found the deprecated header's *merge
-  // semantics* unprotected on Fire OS: dropping the override left every test green. It is adapter-internal
-  // and only observable through a rendered component, so — as with the ordering guard above — the check is
-  // structural. Crude, but it fails when the contract is broken. The web adapter's merge is asserted by
-  // `player.spec.ts › 'deprecated x-kit-text-urls still adds ids …'`.
-  it('the Fire OS adapter writes the url map once, and that write is the header override', () => {
-    const s = fireos()
-    // Manifest URLs build the map; the deprecated header is merged *after* it, so an entry overrides a
-    // manifest URL for the same id (docs/decisions/0004). A second write to the map would undo that.
-    expect(s.match(/urls\.set\(/g)).toHaveLength(1)
-    expect(s).toMatch(/Object\.entries\(deprecatedTextUrls\([^)]*\)\)\)\s*urls\.set\(/)
+  it('the Fire OS adapter has one onTracks call site', () => {
+    // Where and when it publishes is behavioural now: test/fireos-adapter.test.tsx renders the real adapter
+    // (publishes once, after the manifest; the deprecated header override; superseded loads publish nothing).
+    expect(fireos().match(/props\.onTracks\?\.\(/g)).toHaveLength(1)
   })
 })

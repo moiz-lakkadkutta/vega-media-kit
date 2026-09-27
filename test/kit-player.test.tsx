@@ -2,9 +2,10 @@
 /**
  * Guard of record for KIT-022 (docs/plans/KIT-022-tracks-origin-gate.md §7.1): the real `KitPlayer` — its
  * scheduler, `selectText`, source-change reset and `handleTracks` — rendered under jsdom with a *platform
- * double* in place of the adapter. The double follows the Fire OS adapter's handler contract
- * (`src/player/adapters/fireos.tsx`): `onLoad` publishes through the props it closed over when the native
- * event was dispatched, across its manifest await, and has no cancel (KIT-023). It re-implements no kit logic.
+ * double* in place of the adapter. The double publishes through captured handlers and does **not** cancel —
+ * the shape of the Fire OS adapter before KIT-023 (`onLoad` publishing through the props it closed over when
+ * the native event was dispatched, across its manifest await) — kept because the kit's gate must hold without
+ * adapter cooperation (decision 0005 §3 amendment). It re-implements no kit logic.
  */
 import { act, forwardRef, useImperativeHandle } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -20,9 +21,12 @@ import { KitPlayer } from '../src/player/KitPlayer'
 
 // ---- the platform double (Fire OS contract) --------------------------------------------------------------
 
-/** The latest render's props — what `onLoad`'s `useCallback(…, [props])` closes over (fireos.tsx:69-88). */
+/**
+ * The latest render's props — what a captured-handler `onLoad` (`useCallback(…, [props])`) closes over, as the
+ * Fire OS adapter did before KIT-023. The double does not cancel: the kit's gate must hold without it (0005 §3).
+ */
 let latest: { props: AdapterProps | null } = { props: null }
-/** fireos.tsx:26 — overwritten by every *completed* load (:78) before it publishes (:84). */
+/** One shared url map, overwritten by every *completed* load before it publishes — pre-KIT-023 Fire OS shape. */
 let textUrls = new Map<string, string>()
 const selectTextCalls: string[][] = []
 const selectAudioCalls: string[] = []
@@ -32,7 +36,7 @@ const vttFor = (url: string) => `WEBVTT\n\n00:00:00.000 --> 00:00:10.000\n${url}
 
 const Double = forwardRef<KitPlayerRef, AdapterProps>(function Double(props, ref) {
   latest.props = props
-  // Re-created every render (no deps), as the real adapters' handles are (fireos.tsx:36-49): `selectText`
+  // Re-created every render (no deps), as the real adapters' handles are (`FireOsAdapter`'s `useImperativeHandle`): `selectText`
   // delivers through *this render's* `onTextTrackData` — the handler live when `selectText` is called.
   useImperativeHandle(ref, () => ({
     play: () => {},
@@ -203,8 +207,9 @@ describe('KitPlayer origin gate on onTracks (KIT-022)', () => {
   })
 
   it("pins: a superseded load's onState('ready') still reaches the app — KIT-015 decides", () => {
-    // PINNED, NOT ENDORSED (plan §5): `handleState` is not source-scoped. KIT-015 decides whether the gate
-    // extends to `loading`/`ready` or KIT-023's adapter-side cancel removes this; either way this goes red.
+    // PINNED, NOT ENDORSED (plan §5): `handleState` is not source-scoped. KIT-023 landed without changing
+    // this pin: the double deliberately does not cancel superseded loads, so this tests the kit alone.
+    // Whether the gate extends to `loading`/`ready` (and the live load's `ready` ordering) is KIT-015/KIT-028's.
     render('A')
     const loadA = beginLoad()
     render('B')
