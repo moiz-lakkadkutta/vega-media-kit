@@ -57,8 +57,18 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
     [scheduler],
   )
 
+  /**
+   * The origin gate on `onTracks`, mirroring `handleTextTrackData`: re-created per `source.uri`, and a report
+   * that arrives through a handler created for a source that is no longer live is dropped whole — not forwarded
+   * to the app, not latched into `appliedPrefs`, not shown in `renderControls`. Adapters publish through the
+   * `onTracks` they held when the load began (web: the load effect's props; fireos: the `onLoad` closure across
+   * its await), so a superseded load's report arrives here with `sourceUri` = that source. The kit does not rely
+   * on an adapter cancelling its own load: fireos has no cancel (KIT-023), and on web the cancel is closed only
+   * because the reset below schedules sync state (see the note there).
+   */
   const handleTracks = useCallback(
     (t: Tracks) => {
+      if (sourceUri !== liveUri.current) return // a report for a source that is no longer live
       tracksRef.current = t
       setTracks(t)
       props.onTracks?.(t)
@@ -73,7 +83,7 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
         if (tx.length) selectText(tx)
       }
     },
-    [props.onTracks, props.preferredAudio, props.preferredText, selectText],
+    [props.onTracks, props.preferredAudio, props.preferredText, selectText, sourceUri],
   )
 
   const handlePosition = useCallback(
@@ -116,7 +126,13 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
    * commit, so this precedes the adapters' own `useEffect` on `source.uri` regardless of how they emit. A
    * passive effect would run after the adapter's (children first) and could wipe a `preferredText` the new
    * source had already applied. Compares against `liveUri` rather than trusting "the effect ran", so it is a
-   * no-op on first mount and under StrictMode's double invocation.
+   * no-op on first mount and under StrictMode's double invocation. The state updates below also make the
+   * adapters' passive cleanup run *inside* this commit on every update lane (KIT-022 §1). The load-bearing one is
+   * `setTracks` with a fresh object, which can never bail out; `setPosition(start)` alone can take React's eager
+   * bailout when the position is unchanged and schedule nothing. This relies on React 18/19 work-loop behaviour
+   * (a layout-phase setState is SyncLane; sync work flushes pending passive effects first), verified on
+   * react-dom 19.3 — not a documented React guarantee. Pinned by harness spec 25; without it the web adapter's
+   * `cancelled` flag is set one task too late for a DefaultLane source change.
    */
   useLayoutEffect(() => {
     if (!sourceChanged({ uri: liveUri.current }, props.source)) return

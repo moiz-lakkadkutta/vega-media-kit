@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { KitPlayer } from '../src/player'
@@ -32,6 +32,15 @@ declare global {
       renders(): number
       /** `onPosition` calls so far — one per `timeupdate` while playing. */
       positionTicks: number
+      /** `?hold=`: the held response has arrived and is waiting to be handed over (KIT-022 §7.2). */
+      heldReady(): boolean
+      /** `?hold=`: hand the held response to its caller; every hop after this is a microtask. */
+      releaseHeld(): void
+      /** Re-render with a new `source.uri` from a timer — a DefaultLane update, not `flushSync` — and arm App's
+       *  layout effect to call `releaseHeld()` inside that switch's commit (after KitPlayer's reset). */
+      setSourceDeferred(uri: string): void
+      /** `<video src>` when the held response was released and when it was handed over. */
+      diag: { releasedAt: { videoSrc: string | null } | null; handover: { rendered: string; videoSrc: string | null } | null }
     }
   }
 }
@@ -45,6 +54,9 @@ const primary = q.get('primary') ?? '0'
 // KIT-012: pass `onCue`/`onPosition` as inline arrows (a new identity every render) instead of the module-scope
 // constants below, the way a README-naive app would. The kit must not rebuild its scheduler for that.
 const inlineCallbacks = q.get('inlineCallbacks') === '1'
+// KIT-022 §7.2: `?hold=<encodeURIComponent(pathname)>` — the first `fetch` of that path is made eagerly but handed
+// to the caller only on `releaseHeld()`. Encoded, or routeStream's `**/stream/**` glob swallows the page itself.
+const hold = q.get('hold')
 
 const kit: Window['__kit'] = {
   ref: null,
@@ -77,8 +89,42 @@ const kit: Window['__kit'] = {
   refIdentities: () => refs.size,
   renders: () => renders,
   positionTicks: 0,
+  heldReady: () => heldArrived,
+  releaseHeld: () => releaseHeldFn(),
+  setSourceDeferred: (uri) => {
+    deferredTarget = uri
+    setTimeout(() => setSrcState(uri), 0) // no flushSync, no event: React gives this update DefaultLane
+  },
+  diag: { releasedAt: null, handover: null },
 }
 window.__kit = kit
+
+const videoSrc = () => document.querySelector('video')?.getAttribute('src') ?? null
+let renderedUri = src
+let deferredTarget: string | null = null
+let heldArrived = false
+let releaseHeldFn: () => void = () => {}
+if (hold) {
+  // Installed only under `?hold=`; a single first-match gate, every other request passes straight through.
+  const realFetch = window.fetch.bind(window)
+  let armed = true
+  window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (!armed || new URL(href, location.href).pathname !== hold) return realFetch(input, init)
+    armed = false
+    return realFetch(input, init).then(async (res) => {
+      const body = await res.text()
+      // Duck-typed: `fetchHlsMaster` takes the structural `HlsFetch`, so no Response has to be rebuilt.
+      const duck = { ok: res.ok, status: res.status, url: res.url, text: () => Promise.resolve(body) }
+      await new Promise<void>((resolve) => {
+        releaseHeldFn = resolve
+        heldArrived = true
+      })
+      kit.diag.handover = { rendered: renderedUri, videoSrc: videoSrc() }
+      return duck
+    })
+  }) as typeof window.fetch
+}
 const log = (e: Ev) => {
   kit.events.push(e)
   const pre = document.getElementById('events')
@@ -114,6 +160,15 @@ function App() {
   setCuesState = setCues
   setSrcState = setUri
   setBumpState = setBump
+  renderedUri = uri
+  // Parent layout effects run after the child's, so this runs inside the switch's commit after KitPlayer's
+  // reset and before the adapter's passive effect — unless something flushed that effect already (the pin).
+  useLayoutEffect(() => {
+    if (deferredTarget === null || uri !== deferredTarget) return
+    deferredTarget = null
+    kit.diag.releasedAt = { videoSrc: videoSrc() }
+    kit.releaseHeld()
+  }, [uri])
   return (
     <>
       <KitPlayer

@@ -10,7 +10,8 @@ import { cueIds, deferred, events, routeStream } from './helpers'
  * scheduler, and the `ref` handed to `renderControls` must not change identity on position ticks or `onTracks`.
  * Specs 21–23 (KIT-019): a source switch tears down the previous load — no leaked listeners, no stale `onTracks`.
  * Spec 24 (KIT-026): a cue repeated across HLS segment boundaries (RFC 8216 §3.5) reaches `onCue` once and the
- * overlay draws it once, per track.
+ * overlay draws it once, per track. Spec 25 (KIT-022 §7.2): pins why the web adapter's cancel holds on every
+ * update lane — a DefaultLane switch still runs the adapter's passive cleanup inside the switch's commit.
  */
 const BASE = 'http://localhost:4173'
 const trackEvents = (page: Page) => events(page).then((e) => e.filter((x) => x.type === 'tracks'))
@@ -328,4 +329,28 @@ test('a cue repeated across segment boundaries reaches onCue once and the overla
   expect(await cueIds(page, 6.75)).toEqual([])
   // Every segment was fetched; the de-dupe is in the join, not in what was requested.
   for (const t of ['en', 'de']) for (const s of ['seg-0', 'seg-1', 'seg-2']) expect(hits).toContain(`fetch subs-c/${t}/${s}.vtt`)
+})
+
+test("a source switch from a timer (DefaultLane) tears down the previous load inside the same commit: A's manifest handed over one microtask after the reset still cannot publish", async ({ page }) => {
+  // Pins the coupling in KitPlayer's reset (KIT-022 §1): its setTracks/setPosition are SyncLane (issued during
+  // layout), so React flushes the adapters' passive effects before that sync work, still inside the commit. A's
+  // manifest is released from App's layout effect in B's commit — after the reset, before the adapter's passive
+  // effect would run on its own — and handed over one microtask later. By then `<video src>` must be B's.
+  const hits = await routeStream(page)
+  await page.goto('/player.html?hold=' + encodeURIComponent('/stream/master') + '&preferred=' + encodeURIComponent('{"languages":["de"]}'))
+  await expect.poll(() => hasState(page, 'ready')).toBe(true)
+  await expect.poll(() => page.evaluate(() => window.__kit.heldReady())).toBe(true)
+  expect(await trackEvents(page)).toHaveLength(0)
+
+  await page.evaluate(() => window.__kit.setSourceDeferred('/stream/master-b'))
+  await expect.poll(() => trackEvents(page).then((t) => t.length)).toBeGreaterThanOrEqual(1)
+  await page.waitForTimeout(300)
+  const t = await trackEvents(page)
+  expect(t).toHaveLength(1)
+  expect(t[0]!.type === 'tracks' && t[0]!.tracks.text).toEqual(MANIFEST_TRACKS_B)
+  const diag = await page.evaluate(() => window.__kit.diag)
+  expect(diag.releasedAt?.videoSrc).toBe('/stream/master') // released before the adapter's passive effect
+  expect(diag.handover?.videoSrc).toBe('/stream/master-b') // the pin: the passive effect ran before the hand-over
+  expect(hits.some((h) => h.startsWith('fetch subs/de/'))).toBe(false)
+  await expect.poll(() => cueText(page, 2)).toEqual(['Zweite Quelle'])
 })

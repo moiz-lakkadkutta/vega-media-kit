@@ -80,6 +80,10 @@ adapter violates this today — its load effect has no cleanup, so a switch made
 resolves lets A's `Promise.all([manifest, metadata])` complete against B's `loadedmetadata` and publish A's
 tracks after the reset, latching `appliedPrefs` on the wrong list. Tracked as KIT-019, due before 0.1.0.
 
+*Amended (KIT-022):* the kit enforces the §3 amendment itself — `handleTracks` is re-created per
+`source.uri` like `handleTextTrackData` and drops a report from a handler whose source is no longer live.
+Adapter-side cancellation remains required for adapter-internal state.
+
 **4. The race is real and the gate is extended: VTT is accepted only if it was requested for the source
 that is live now.** `acceptsTextTrackData` gating on `selectedText` alone is *not* sufficient. Both web and
 fireos `selectText` are `for … await` loops; a fetch started for source A resolves after the switch. The

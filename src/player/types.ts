@@ -38,7 +38,19 @@ export interface KitPlayerProps {
   testID?: string
 }
 
-/** What every adapter implements. Adapters are React components that accept these props and expose a ref. */
+/**
+ * What every adapter implements. Adapters are React components that accept these props and expose a ref.
+ *
+ * Origin contract for per-source reports: call the `onTracks` you held when the load began — the load effect's
+ * props on web, the `onLoad` closure across its await on Fire OS — and the `onTextTrackData` you were handed at
+ * `selectText` time. Never read either through a latest-props ref. The kit re-creates both per `source.uri`
+ * and uses *which handler* delivered a report to drop reports for a source that is no longer live
+ * (docs/decisions/0005 §4; KIT-022). An adapter should still cancel its own superseded loads (KIT-023): the
+ * kit's gate drops the report, it cannot undo an adapter's internal state. Never call `onTracks` /
+ * `onTextTrackData` for a new source synchronously during render or from your own layout effects /
+ * `useImperativeHandle`: child layout effects run before KitPlayer's reset updates the live uri, so such a report
+ * would be refused.
+ */
 export interface AdapterProps extends KitPlayerProps {
   /**
    * Adapter-independent cue delivery: adapters that can't emit cues call this with fetched VTT text per track.
