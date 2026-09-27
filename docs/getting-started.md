@@ -6,7 +6,9 @@
 3. Nothing else to pass for subtitles: the kit reads the master playlist itself and reports the text tracks through `onTracks`. See [Text tracks](#text-tracks).
 4. `adb connect <stick-ip> && adb install app-release.apk`.
 
-## Vega OS — Vega Virtual Device or Fire TV Stick 4K Select
+## Vega OS — experimental, not device-verified
+The Vega adapter and platform bindings compile and are exported, but none of this has been run on the Vega Virtual Device or a Fire TV Stick 4K Select. The adapter does not play video as written — its rewrite (KIT-010, [decision 0002](decisions/0002-vega-media-surface.md)) and the platform bindings (KIT-007) are deferred, and the Vega bindings are no-ops today. See [decision 0001](decisions/0001-week0-gates.md). The steps below are the intended setup, **unverified**:
+
 1. Install the Vega SDK (macOS/Ubuntu; Apple Silicon needs Rosetta 2; ~20 GB).
 2. Create the app with `vega` CLI (React Native for Vega 0.72). Add the kit; follow `vega-video-sample`'s post-install to vendor Shaka.
 3. `vega virtual-device start` → `vega run-app build/aarch64-release/<app>.vpkg`.
@@ -58,4 +60,4 @@ web a custom request header forces a CORS preflight that a CDN without
 the header.
 
 ## Scale
-Sizes in the kit are "px at 1920×1080". Fire OS renders at 960×540 dp → pass `scale={0.5}`; Vega apps usually pass `1`. Multiply by the user's caption-size setting through `theme.userScale`.
+Sizes in the kit are "px at 1920×1080". Fire OS renders at 960×540 dp → pass `scale={0.5}`; Vega apps are expected to pass `1` (unverified). Multiply by the user's caption-size setting through `theme.userScale`.
