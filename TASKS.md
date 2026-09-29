@@ -71,7 +71,7 @@ were opened by the orchestrator from review findings; renumber if they collide w
 ## Waiting on the human
 
 1. ~~The `0001` gate~~ — recorded 2026-09-26 (decision 0001).
-2. ~~KIT-014~~ — decided 2026-09-29 (decision 0007): descriptions opt-in; an empty preference selects nothing. Pinned by a test marked *PINNED, NOT ENDORSED* until decided.
+2. ~~KIT-014~~ — decided 2026-09-29 (decision 0007): descriptions opt-in; an empty preference selects nothing. The *PINNED, NOT ENDORSED* test in `test/selection.test.ts` is replaced when KIT-014 is implemented.
 3. **`described` migration** — app ticket, not kit work (decided 2026-09-18). Content is in decision 0004:
    stop passing the header; select by `(kind, language)` from `onTracks` instead of composing ids; add
    `hls_characteristics=public.accessibility.describes-video` to the descriptions stream in
