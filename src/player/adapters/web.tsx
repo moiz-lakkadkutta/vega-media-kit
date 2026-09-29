@@ -19,6 +19,7 @@ export const WebAdapter = forwardRef<KitPlayerRef, AdapterProps>(function WebAda
     // every await re-checks `cancelled` before touching props, and every listener is removed by reference, so
     // a superseded load neither publishes its `onTracks` over the new source's reset nor reports its events.
     let cancelled = false
+    props.onState?.('loading')
     const headerUrls = deprecatedTextUrls(props.source.headers)
     // No headers on the manifest request: this matches today's bare fetch(t.url) and avoids a CORS preflight.
     const manifest = loadHlsTextTracks(props.source.uri).catch((e) => {
@@ -27,8 +28,9 @@ export const WebAdapter = forwardRef<KitPlayerRef, AdapterProps>(function WebAda
     })
     let metadataSeen: () => void = () => {}
     const metadata = new Promise<void>((resolve) => (metadataSeen = () => resolve()))
-    // One onTracks, once both the element's metadata and the manifest are in — otherwise KitPlayer's
-    // appliedPrefs would latch on a track list that is still missing the manifest tracks.
+    // One onTracks, then ready, once both the element's metadata and the manifest are in — otherwise KitPlayer's
+    // appliedPrefs would latch on a track list that is still missing the manifest tracks, and an app reading
+    // getTracks() in onState('ready') would get an empty list.
     void Promise.all([manifest, metadata]).then(([manifestText]) => {
       if (cancelled) return
       const text: TextTrack[] = manifestText.map((t) => (headerUrls[t.id] ? { ...t, url: headerUrls[t.id] } : t))
@@ -42,10 +44,10 @@ export const WebAdapter = forwardRef<KitPlayerRef, AdapterProps>(function WebAda
         text,
       }
       props.onTracks?.(tracks.current)
+      props.onState?.('ready') // from the join, after onTracks: the contract in AdapterProps (KIT-015)
     })
     const listeners: [keyof HTMLVideoElementEventMap, () => void][] = [
       ['loadedmetadata', metadataSeen],
-      ['loadedmetadata', () => props.onState?.('ready')],
       ['timeupdate', () => props.onPosition?.(v.currentTime)],
       ['play', () => props.onState?.('playing')],
       ['pause', () => props.onState?.('paused')],

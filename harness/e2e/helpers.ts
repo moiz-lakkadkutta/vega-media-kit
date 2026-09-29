@@ -74,5 +74,14 @@ export const rect = (l: Locator) =>
 
 export const events = (page: Page) => page.evaluate(() => window.__kit.events)
 
+/**
+ * The element has its metadata (`readyState >= HAVE_METADATA`; for `src` when given). Since KIT-015 `ready`
+ * waits for the manifest as well, so a spec that holds the manifest needs this witness, not `state:ready`.
+ */
+export const metadataLoaded = (page: Page, src?: string) =>
+  page
+    .getByTestId('kit-video')
+    .evaluate((v: HTMLVideoElement, src) => v.readyState >= 1 && (src === undefined || v.getAttribute('src') === src), src)
+
 export const cueIds = (page: Page, t: number) =>
   page.evaluate((t) => window.__kit.seek(t).map((c) => `${c.trackId}:${c.id}`), t)

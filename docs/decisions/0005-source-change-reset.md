@@ -84,6 +84,10 @@ tracks after the reset, latching `appliedPrefs` on the wrong list. Tracked as KI
 `source.uri` like `handleTextTrackData` and drops a report from a handler whose source is no longer live.
 Adapter-side cancellation remains required for adapter-internal state.
 
+*Amended (KIT-015/KIT-028, decision 0008):* the kit also refuses two kinds of state report — a `ready` that
+arrives after the live load reported `playing`/`ended`, and any state through a handler created for a source
+that is no longer live. Refusing is not synthesising; the kit still emits no state of its own.
+
 **4. The race is real and the gate is extended: VTT is accepted only if it was requested for the source
 that is live now.** `acceptsTextTrackData` gating on `selectedText` alone is *not* sufficient. Both web and
 fireos `selectText` are `for … await` loops; a fetch started for source A resolves after the switch. The

@@ -41,6 +41,8 @@ declare global {
       setSourceDeferred(uri: string): void
       /** `<video src>` when the held response was released and when it was handed over. */
       diag: { releasedAt: { videoSrc: string | null } | null; handover: { rendered: string; videoSrc: string | null } | null }
+      /** The state KitPlayer last handed to renderControls (spec 26). */
+      state(): PlayerState
     }
   }
 }
@@ -96,6 +98,7 @@ const kit: Window['__kit'] = {
     setTimeout(() => setSrcState(uri), 0) // no flushSync, no event: React gives this update DefaultLane
   },
   diag: { releasedAt: null, handover: null },
+  state: () => kitState,
 }
 window.__kit = kit
 
@@ -138,6 +141,7 @@ let setSrcState: (uri: string) => void = () => {}
 let setBumpState: (f: (n: number) => number) => void = () => {}
 const refs = new Set<KitPlayerRef>()
 let renders = 0
+let kitState: PlayerState = 'idle'
 const onCue = (active: Cue[]) => {
   kit.active = active
   log({ type: 'cue', ids: active.map((c) => `${c.trackId}:${c.id}`) })
@@ -184,6 +188,7 @@ function App() {
         renderControls={(ctx) => {
           refs.add(ctx.ref)
           renders++
+          kitState = ctx.state
           return null
         }}
         testID="kit-video"

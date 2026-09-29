@@ -19,6 +19,12 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
   const [tracks, setTracks] = useState<Tracks>({ audio: [], text: [] })
   const selectedText = useRef<Set<string>>(new Set())
   const appliedPrefs = useRef(false)
+  /**
+   * Whether the live load has reported `playing` (or `ended`). A `ready` that arrives afterwards is dropped:
+   * `ready` means "loaded, not yet playing" and must never overwrite a later state (docs/decisions/0008). Fire OS
+   * reads the master playlist after ExoPlayer has already started (KIT-028); web waits for the manifest too.
+   */
+  const playbackBegan = useRef(false)
   /** The source the kit's per-source state (selection, latch, scheduler tracks) currently belongs to. */
   const liveUri = useRef(props.source.uri)
   const sourceUri = props.source.uri
@@ -97,12 +103,23 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
     [props.onPosition, scheduler],
   )
 
+  /**
+   * The state gate (docs/decisions/0008). Re-created per `source.uri` like `handleTracks`: a report through a
+   * handler created for a source that is no longer live is dropped — adapters report state through per-load
+   * closures (web listeners, the Vega load) or latest-props handlers (Fire OS), so only a superseded load's report
+   * can arrive stale. `ready` is dropped once the live load has reported `playing`/`ended`: the adapter could not
+   * order it earlier without reporting `ready` before `onTracks`. The kit never synthesises a state (0005 §3); it
+   * only refuses one.
+   */
   const handleState = useCallback(
     (s: PlayerState) => {
+      if (sourceUri !== liveUri.current) return // a report for a source that is no longer live
+      if (s === 'ready' && playbackBegan.current) return // ready never overwrites playing (KIT-028)
+      if (s === 'playing' || s === 'ended') playbackBegan.current = true
       setState(s)
       props.onState?.(s)
     },
-    [props.onState],
+    [props.onState, sourceUri],
   )
 
   /**
@@ -141,6 +158,7 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
     const start = props.startAt ?? 0
     selectedText.current = applyTextSelection([], scheduler.tracks).selected // refuse VTT first
     appliedPrefs.current = false // the new source's first onTracks re-applies preferredAudio/preferredText
+    playbackBegan.current = false // the new load's ready is reported unless it, too, is already playing
     for (const t of scheduler.tracks) scheduler.removeTrack(t) // the getter copies, so removing while iterating is safe
     scheduler.update(start) // removeTrack never notifies; this emits onCue([]) iff cues were on screen
     setTracks({ audio: [], text: [] }) // renderControls must not show the previous source's tracks

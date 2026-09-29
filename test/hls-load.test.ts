@@ -274,4 +274,11 @@ describe('adapter wiring', () => {
     // (publishes once, after the manifest; the deprecated header override; superseded loads publish nothing).
     expect(fireos().match(/props\.onTracks\?\.\(/g)).toHaveLength(1)
   })
+
+  it('the Vega adapter publishes tracks before it reports ready (KIT-015; source-order pin, see plan §7.4)', () => {
+    // A PIN of source order, not a behavioural test: the Vega scaffold cannot render under vitest (it `require`s
+    // w3cmedia and shaka-player inside the component). KIT-010 replaces this with a real render test.
+    const vega = src('player/adapters/vega.tsx')
+    expect(vega).toMatch(/await p\.load\([^)]*\)\s*\n\s*publishTracks\(\)\s*\n\s*props\.onState\?\.\('ready'\)/)
+  })
 })

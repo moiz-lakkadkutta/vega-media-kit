@@ -27,6 +27,13 @@ export interface KitPlayerProps {
   preferredText?: { languages?: string[]; kinds?: TextKind[] }
   /** Called ≤ 4 Hz. */
   onPosition?(seconds: number): void
+  /**
+   * Playback state. Per load of `source.uri`: `loading` first; `onTracks` is always reported before `ready`, so
+   * `getTracks()` and `selectText` work inside `onState('ready')`; `ready` is not reported for a load that has
+   * already reported `playing` or `ended` (an autoplay load whose tracks arrive after playback began goes
+   * `loading → … → playing`, with `onTracks` in between), and it never overwrites `playing` in `renderControls`.
+   * States of a source the app has switched away from are not reported (docs/decisions/0008).
+   */
   onState?(state: PlayerState): void
   onTracks?(tracks: Tracks): void
   /** Every change of the active-cue set, across all selected text tracks. */
@@ -47,9 +54,17 @@ export interface KitPlayerProps {
  * and uses *which handler* delivered a report to drop reports for a source that is no longer live
  * (docs/decisions/0005 §4; KIT-022). An adapter should still cancel its own superseded loads (KIT-023): the
  * kit's gate drops the report, it cannot undo an adapter's internal state. Never call `onTracks` /
- * `onTextTrackData` for a new source synchronously during render or from your own layout effects /
+ * `onTextTrackData` / `onState` for a new source synchronously during render or from your own layout effects /
  * `useImperativeHandle`: child layout effects run before KitPlayer's reset updates the live uri, so such a report
  * would be refused.
+ *
+ * State contract for one load: report `loading` when the load begins; report `onTracks` exactly once when the track
+ * list is complete (docs/decisions/0004) and `ready` immediately after it, from the same continuation — never from
+ * a separate event such as `loadedmetadata`. Report `playing` / `paused` / `buffering` / `ended` as the platform
+ * does, before or after `ready`. The kit drops a `ready` that arrives after the load reported `playing` or `ended`
+ * (Fire OS reads the master playlist after ExoPlayer has started) and drops every state report that arrives through
+ * an `onState` created for a source that is no longer live — so hold `onState` the same way as `onTracks`
+ * (docs/decisions/0008; KIT-015, KIT-028).
  */
 export interface AdapterProps extends KitPlayerProps {
   /**

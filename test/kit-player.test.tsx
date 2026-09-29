@@ -5,7 +5,8 @@
  * double* in place of the adapter. The double publishes through captured handlers and does **not** cancel —
  * the shape of the Fire OS adapter before KIT-023 (`onLoad` publishing through the props it closed over when
  * the native event was dispatched, across its manifest await) — kept because the kit's gate must hold without
- * adapter cooperation (decision 0005 §3 amendment). It re-implements no kit logic.
+ * adapter cooperation (decision 0005 §3 amendment). It re-implements no kit logic. Since KIT-015 the state gate
+ * is asserted here too (#5–#7; docs/decisions/0008).
  */
 import { act, forwardRef, useImperativeHandle } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -101,9 +102,10 @@ const PREF = { languages: ['de'] }
 const onTracks = vi.fn<(t: Tracks) => void>()
 const onState = vi.fn<(s: PlayerState) => void>()
 const onCue = vi.fn<(c: Cue[]) => void>()
-const ctx: { tracks: Tracks | null } = { tracks: null }
-const renderControls = (c: { tracks: Tracks }) => {
+const ctx: { tracks: Tracks | null; state: PlayerState | null } = { tracks: null, state: null }
+const renderControls = (c: { tracks: Tracks; state: PlayerState }) => {
   ctx.tracks = c.tracks
+  ctx.state = c.state
   return null
 }
 
@@ -145,6 +147,7 @@ beforeEach(() => {
   onState.mockClear()
   onCue.mockClear()
   ctx.tracks = null
+  ctx.state = null
   root = createRoot(document.createElement('div'))
 })
 
@@ -206,15 +209,44 @@ describe('KitPlayer origin gate on onTracks (KIT-022)', () => {
     expect(lastCueTexts()).toEqual(['A/0'])
   })
 
-  it("pins: a superseded load's onState('ready') still reaches the app — KIT-015 decides", () => {
-    // PINNED, NOT ENDORSED (plan §5): `handleState` is not source-scoped. KIT-023 landed without changing
-    // this pin: the double deliberately does not cancel superseded loads, so this tests the kit alone.
-    // Whether the gate extends to `loading`/`ready` (and the live load's `ready` ordering) is KIT-015/KIT-028's.
+  it("drops a superseded load's onState: a report through a handler created for a source that is no longer live is not forwarded", () => {
+    // KIT-015 / decision 0008 §3: the gate on `handleTracks` extends to `handleState`, for every state. The double
+    // deliberately does not cancel superseded loads, so this tests the kit alone.
     render('A')
     const loadA = beginLoad()
     render('B')
     loadA.complete(TRACKS_A)
 
-    expect(onState.mock.calls.map(([s]) => s)).toEqual(['ready'])
+    expect(onState).not.toHaveBeenCalled()
+    expect(ctx.state).toBe('idle')
+
+    // B's own load, through B's handler: accepted. Catches a `handleState` that is not re-created per source.
+    beginLoad().complete(TRACKS_B)
+    expect(onState.mock.calls).toEqual([['ready']])
+    expect(ctx.state).toBe('ready')
+  })
+})
+
+describe('KitPlayer state gate: ready never overwrites playing (KIT-015 / KIT-028)', () => {
+  it("ready does not overwrite playing: a load whose tracks arrive after playback began stays 'playing'", () => {
+    render('A')
+    const loadA = beginLoad()
+    act(() => latest.props!.onState?.('playing'))
+    loadA.complete(TRACKS_A)
+
+    expect(onState.mock.calls).toEqual([['playing']])
+    expect(ctx.state).toBe('playing')
+    expect(onTracks.mock.calls).toEqual([[TRACKS_A]]) // the tracks still land; only `ready` is dropped
+  })
+
+  it("a source change forgets that the previous source was playing: the new source's ready is reported", () => {
+    render('A')
+    beginLoad().complete(TRACKS_A)
+    act(() => latest.props!.onState?.('playing'))
+    render('B')
+    beginLoad().complete(TRACKS_B)
+
+    expect(onState.mock.calls).toEqual([['ready'], ['playing'], ['ready']])
+    expect(ctx.state).toBe('ready')
   })
 })

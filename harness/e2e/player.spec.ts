@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { cueIds, deferred, events, routeStream } from './helpers'
+import { cueIds, deferred, events, metadataLoaded, routeStream } from './helpers'
 
 /**
  * The real KitPlayer + WebAdapter in Chromium (plan §5, specs 10–16): `onTracks` ordering against a real
@@ -12,12 +12,21 @@ import { cueIds, deferred, events, routeStream } from './helpers'
  * Spec 24 (KIT-026): a cue repeated across HLS segment boundaries (RFC 8216 §3.5) reaches `onCue` once and the
  * overlay draws it once, per track. Spec 25 (KIT-022 §7.2): pins why the web adapter's cancel holds on every
  * update lane — a DefaultLane switch still runs the adapter's passive cleanup inside the switch's commit.
+ * Specs 10–11 (KIT-015): `ready` is reported from the join, after `onTracks`; spec 26 (KIT-028): the kit drops a
+ * `ready` that would overwrite `playing`.
  */
 const BASE = 'http://localhost:4173'
 const trackEvents = (page: Page) => events(page).then((e) => e.filter((x) => x.type === 'tracks'))
 const hasState = (page: Page, s: string) => events(page).then((e) => e.some((x) => x.type === 'state' && x.state === s))
 const selectText = (page: Page, ids: string[]) => page.evaluate((ids) => window.__kit.ref!.selectText(ids), ids)
 const waitForTracks = (page: Page) => expect.poll(() => trackEvents(page).then((t) => t.length)).toBe(1)
+const stateEvents = (page: Page, s: string) => events(page).then((e) => e.filter((x) => x.type === 'state' && x.state === s).length)
+/** `onTracks` precedes `state:ready` in the event log (KIT-015). */
+const expectTracksBeforeReady = async (page: Page) => {
+  const e = await events(page)
+  expect(e.findIndex((x) => x.type === 'tracks')).toBeGreaterThanOrEqual(0)
+  expect(e.findIndex((x) => x.type === 'tracks')).toBeLessThan(e.findIndex((x) => x.type === 'state' && x.state === 'ready'))
+}
 
 const MANIFEST_TRACKS = [
   { id: '0', language: 'de', label: 'Deutsch', kind: 'subtitles', active: false, url: `${BASE}/stream/subs/de/index.m3u8` },
@@ -34,21 +43,24 @@ const setSource = (page: Page, uri: string) =>
     return window.__kit.events.slice(n)
   }, uri)
 
-test('onTracks waits for the manifest: nothing is published on loadedmetadata alone', async ({ page }) => {
+test('onTracks and ready wait for the manifest: nothing is published on loadedmetadata alone', async ({ page }) => {
   const m = deferred()
   await routeStream(page, { manifest: m.promise })
   await page.goto('/player.html')
-  await expect.poll(() => hasState(page, 'ready')).toBe(true)
+  await expect.poll(() => metadataLoaded(page)).toBe(true)
   expect(await trackEvents(page)).toHaveLength(0)
+  expect(await stateEvents(page, 'ready')).toBe(0)
   m.resolve()
   await waitForTracks(page)
+  await expect.poll(() => hasState(page, 'ready')).toBe(true)
+  await expectTracksBeforeReady(page)
   const [t] = await trackEvents(page)
   expect(t!.type === 'tracks' && t!.tracks.text).toEqual(MANIFEST_TRACKS)
   await page.waitForTimeout(300)
   expect(await trackEvents(page)).toHaveLength(1)
 })
 
-test('onTracks waits for loadedmetadata: a resolved manifest alone publishes nothing', async ({ page }) => {
+test('onTracks waits for loadedmetadata, and ready follows onTracks: a resolved manifest alone publishes nothing', async ({ page }) => {
   const md = deferred()
   const hits = await routeStream(page, { media: md.promise })
   await page.goto('/player.html')
@@ -58,19 +70,18 @@ test('onTracks waits for loadedmetadata: a resolved manifest alone publishes not
   expect(await hasState(page, 'ready')).toBe(false)
   md.resolve()
   await waitForTracks(page)
-  // Both land only once the element has its metadata. The order between `tracks` and `state:ready` is not
-  // asserted here — no adapter-wide contract exists yet (Fire OS emits tracks→ready, Vega ready→tracks, web
-  // is race-dependent: a manifest that settled first reaches `Promise.all(...).then` in the microtask
-  // checkpoint Chromium runs between the two loadedmetadata listeners). See TASKS.md follow-up.
+  // Both land only once the element has its metadata, and `ready` after `onTracks` (decision 0008).
   await expect.poll(() => hasState(page, 'ready')).toBe(true)
   expect(await trackEvents(page)).toHaveLength(1)
+  await expectTracksBeforeReady(page)
+  expect(await stateEvents(page, 'ready')).toBe(1)
 })
 
-test('preferredText auto-selects a manifest track even when the manifest lands after ready', async ({ page }) => {
+test('preferredText auto-selects a manifest track even when the manifest lands after loadedmetadata', async ({ page }) => {
   const m = deferred()
   await routeStream(page, { manifest: m.promise })
   await page.goto('/player.html?preferred=' + encodeURIComponent('{"languages":["en"]}'))
-  await expect.poll(() => hasState(page, 'ready')).toBe(true)
+  await expect.poll(() => metadataLoaded(page)).toBe(true)
   m.resolve()
   // No selectText from the test: the appliedPrefs latch (decision 0004) must fire on the manifest tracks.
   await expect.poll(() => cueIds(page, 2)).toEqual(['1:c1'])
@@ -222,19 +233,20 @@ test('the ref handed to renderControls is stable across position ticks and onTra
 // KIT-019: the web adapter's load effect must tear down the previous load — its element listeners and its
 // in-flight manifest/metadata promise — when `source.uri` changes. Before the fix, every switch added five more
 // listeners (so `ready` and `timeupdate` multiplied) and a superseded load could still publish its `onTracks`.
-const stateEvents = (page: Page, s: string) => events(page).then((e) => e.filter((x) => x.type === 'state' && x.state === s).length)
 
-test('after two source switches each load reports ready once and each timeupdate one position tick', async ({ page }) => {
+test('after two source switches each load reports loading and ready once and each timeupdate one position tick', async ({ page }) => {
   await routeStream(page)
   await page.goto('/player.html')
   await waitForTracks(page)
   expect(await stateEvents(page, 'ready')).toBe(1)
+  expect(await stateEvents(page, 'loading')).toBe(1)
   await setSource(page, '/stream/master-b')
   await expect.poll(() => trackEvents(page).then((t) => t.length)).toBe(2)
   await setSource(page, '/stream/master')
   await expect.poll(() => trackEvents(page).then((t) => t.length)).toBe(3)
   await page.waitForTimeout(300) // let any duplicate `ready` from a leaked listener land before counting
   expect(await stateEvents(page, 'ready')).toBe(3) // one per load, not 1 + 2 + 3
+  expect(await stateEvents(page, 'loading')).toBe(3)
 
   // Count the element's own timeupdates next to the kit's onPosition calls, reset and read in one task each.
   await page.evaluate(() => {
@@ -255,11 +267,11 @@ test('after two source switches each load reports ready once and each timeupdate
 })
 
 test("a superseded load's onTracks never publishes: A's manifest released after B completes", async ({ page }) => {
-  // Hold A's manifest (not its media), so A's element reaches `ready` but its Promise.all is still pending.
+  // Hold A's manifest (not its media), so A's element has its metadata but its Promise.all is still pending.
   const a = deferred()
   const hits = await routeStream(page, { hold: { master: a.promise } })
   await page.goto('/player.html?preferred=' + encodeURIComponent('{"languages":["de"]}'))
-  await expect.poll(() => hasState(page, 'ready')).toBe(true)
+  await expect.poll(() => metadataLoaded(page)).toBe(true)
   expect(hits).toContain('fetch master')
   expect(await trackEvents(page)).toHaveLength(0)
 
@@ -277,6 +289,7 @@ test("a superseded load's onTracks never publishes: A's manifest released after 
   expect((await page.evaluate(() => window.__kit.ref!.getTracks())).text).toEqual(MANIFEST_TRACKS_B)
   expect(await cueText(page, 9)).toEqual([]) // A's c3 would show here
   expect(await cueText(page, 2)).toEqual(['Zweite Quelle'])
+  expect(await stateEvents(page, 'ready')).toBe(1) // B's only: A's `ready` is inside its cancelled join
 })
 
 test("a superseded load's onTracks cannot latch preferredText: A's manifest released before B's", async ({ page }) => {
@@ -286,12 +299,12 @@ test("a superseded load's onTracks cannot latch preferredText: A's manifest rele
   const b = deferred()
   const hits = await routeStream(page, { hold: { master: a.promise, 'master-b': b.promise } })
   await page.goto('/player.html?preferred=' + encodeURIComponent('{"languages":["de"]}'))
-  await expect.poll(() => hasState(page, 'ready')).toBe(true)
+  await expect.poll(() => metadataLoaded(page)).toBe(true)
   expect(hits).toContain('fetch master')
 
   await setSource(page, '/stream/master-b')
   await expect.poll(() => hits).toContain('fetch master-b')
-  await expect.poll(() => stateEvents(page, 'ready')).toBeGreaterThanOrEqual(2) // B's metadata is in, only its manifest is held
+  await expect.poll(() => metadataLoaded(page, '/stream/master-b')).toBe(true) // B's metadata is in, only its manifest is held
 
   const releasedA = page.waitForResponse((r) => new URL(r.url()).pathname === '/stream/master' && r.request().resourceType() === 'fetch').then((r) => r.finished())
   a.resolve()
@@ -306,6 +319,7 @@ test("a superseded load's onTracks cannot latch preferredText: A's manifest rele
   expect(t!.type === 'tracks' && t!.tracks.text).toEqual(MANIFEST_TRACKS_B)
   await expect.poll(() => cueText(page, 2)).toEqual(['Zweite Quelle']) // B's preferredText applied, B's cues
   expect(hits.some((h) => h.startsWith('fetch subs/de/'))).toBe(false)
+  expect(await stateEvents(page, 'ready')).toBe(1) // B's only
 })
 
 test('a cue repeated across segment boundaries reaches onCue once and the overlay draws it once (KIT-026)', async ({ page }) => {
@@ -338,7 +352,7 @@ test("a source switch from a timer (DefaultLane) tears down the previous load in
   // effect would run on its own — and handed over one microtask later. By then `<video src>` must be B's.
   const hits = await routeStream(page)
   await page.goto('/player.html?hold=' + encodeURIComponent('/stream/master') + '&preferred=' + encodeURIComponent('{"languages":["de"]}'))
-  await expect.poll(() => hasState(page, 'ready')).toBe(true)
+  await expect.poll(() => metadataLoaded(page)).toBe(true)
   await expect.poll(() => page.evaluate(() => window.__kit.heldReady())).toBe(true)
   expect(await trackEvents(page)).toHaveLength(0)
 
@@ -353,4 +367,21 @@ test("a source switch from a timer (DefaultLane) tears down the previous load in
   expect(diag.handover?.videoSrc).toBe('/stream/master-b') // the pin: the passive effect ran before the hand-over
   expect(hits.some((h) => h.startsWith('fetch subs/de/'))).toBe(false)
   await expect.poll(() => cueText(page, 2)).toEqual(['Zweite Quelle'])
+})
+
+test("ready does not overwrite playing: a load whose manifest lands after play() stays 'playing' and reports no ready (KIT-028)", async ({ page }) => {
+  const m = deferred()
+  await routeStream(page, { manifest: m.promise })
+  await page.goto('/player.html')
+  await expect.poll(() => metadataLoaded(page)).toBe(true)
+  expect(await stateEvents(page, 'ready')).toBe(0)
+  await page.evaluate(() => window.__kit.play())
+  await expect.poll(() => hasState(page, 'playing')).toBe(true)
+  m.resolve()
+  await waitForTracks(page)
+  await page.waitForTimeout(300)
+  expect(await stateEvents(page, 'ready')).toBe(0)
+  expect(await page.evaluate(() => window.__kit.state())).toBe('playing')
+  const states = (await events(page)).filter((x) => x.type === 'state')
+  expect(states.at(-1)).toEqual({ type: 'state', state: 'playing' })
 })

@@ -35,8 +35,8 @@ export const VegaAdapter = forwardRef<KitPlayerRef, AdapterProps>(function VegaA
       )
       props.onState?.('loading')
       await p.load(props.source.uri, props.startAt)
-      props.onState?.('ready')
       publishTracks()
+      props.onState?.('ready') // after onTracks (KIT-015); Vega is experimental (decision 0001), not device-verified
       if (props.autoplay) void el.play()
     })
     el.addEventListener('timeupdate', () => props.onPosition?.(el.currentTime))

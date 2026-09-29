@@ -87,12 +87,19 @@ let api: KitPlayerRef | null = null
 const setApi = (r: KitPlayerRef | null) => {
   api = r
 }
-function render(uri: string, headers?: Record<string, string>) {
+/** What `renderControls` was last handed — the `state` a HUD reads (KIT-028). */
+const ctx: { state: PlayerState | null } = { state: null }
+function render(uri: string, headers?: Record<string, string>, opts?: { autoplay?: boolean }) {
   act(() =>
     root.render(
       <KitPlayer
         ref={setApi}
         source={{ uri, type: 'hls', headers }}
+        autoplay={opts?.autoplay}
+        renderControls={(c) => {
+          ctx.state = c.state
+          return null
+        }}
         preferredText={PREF}
         onTracks={onTracks}
         onState={onState}
@@ -109,6 +116,9 @@ const load = (e = EXO) => act(() => void rig.props!.onLoad(e))
 const seek = (s: number) => act(() => api!.seek(s))
 const selectText = (ids: string[]) => act(() => api!.selectText(ids))
 const selectAudio = (id: string) => act(() => api!.selectAudio(id))
+/** react-native-video's `onBuffer` / `onPlaybackStateChanged`, as the adapter maps them (`fireos.tsx` `<Video>`). */
+const buffer = (isBuffering: boolean) => act(() => rig.props!.onBuffer({ isBuffering }))
+const playbackState = (isPlaying: boolean) => act(() => rig.props!.onPlaybackStateChanged({ isPlaying }))
 
 beforeEach(() => {
   vi.stubGlobal(
@@ -128,6 +138,7 @@ beforeEach(() => {
   onState.mockClear()
   onError.mockClear()
   onCue.mockClear()
+  ctx.state = null
   root = createRoot(document.createElement('div'))
 })
 afterEach(() => {
@@ -144,6 +155,9 @@ describe('FireOsAdapter — superseded loads (KIT-023)', () => {
     await loadStart() // B's; held[1]
     await release(0, MASTER_A) // A's manifest lands after the switch
 
+    // Since KIT-015 the kit's origin gate on handleState (decision 0008 §3) also drops A's stale `ready`, so this
+    // test stays green if the adapter's post-await cancel is deleted (KIT-023 M1); the A→B→A test below still
+    // goes red on that mutation and remains the guard of the adapter's own cancel.
     expect(onTracks).not.toHaveBeenCalled()
     expect(states()).toEqual(['loading', 'loading'])
     expect(api!.getTracks()).toEqual({ audio: [], text: [] })
@@ -275,5 +289,63 @@ describe('FireOsAdapter — the live load (controls; green before and after KIT-
     await selectText(['9'])
     expect(fetched().at(-1)).toBe('https://h/x.vtt')
     warn.mockRestore()
+  })
+})
+
+describe('FireOsAdapter — tracks before ready; ready never overwrites playing (KIT-015 / KIT-028)', () => {
+  it('reports onTracks before ready for the live load, from the same continuation', async () => {
+    render(A)
+    await loadStart()
+    await load()
+    await release(0, MASTER_A)
+
+    expect(onTracks).toHaveBeenCalledTimes(1)
+    expect(states()).toEqual(['loading', 'ready'])
+    expect(onTracks.mock.invocationCallOrder[0]!).toBeLessThan(onState.mock.invocationCallOrder[1]!) // the `ready` call
+  })
+
+  it("ready does not overwrite playing: loading → buffering → playing → tracks leaves state 'playing' and reports no ready (KIT-028, the device sequence)", async () => {
+    // Replays spike-evidence/fireos-kit023-switch.log (autoplay on): loading, buffering, playing (onBuffer false),
+    // playing (onPlaybackStateChanged), then the manifest-gated onLoad continuation — tracks, then `ready`.
+    render(A, undefined, { autoplay: true })
+    await loadStart()
+    await buffer(true)
+    await buffer(false) // not paused → 'playing'
+    await playbackState(true) // 'playing' again, as the stick reports it
+    await load()
+    await release(0, MASTER_A)
+
+    expect(states()).toEqual(['loading', 'buffering', 'playing', 'playing'])
+    expect(onTracks).toHaveBeenCalledTimes(1)
+    expect(ctx.state).toBe('playing')
+    expect(urls(api!.getTracks())).toEqual(['https://a/en.vtt', 'https://a/de.vtt'])
+  })
+
+  it('ready is still reported after buffering and paused (autoplay off): loading → buffering → paused → tracks → ready', async () => {
+    render(A)
+    await loadStart()
+    await buffer(true)
+    await buffer(false) // paused → 'paused'
+    await load()
+    await release(0, MASTER_A)
+
+    expect(states()).toEqual(['loading', 'buffering', 'paused', 'ready'])
+    expect(ctx.state).toBe('ready')
+  })
+
+  it("a source switched away from while playing does not swallow the new source's ready", async () => {
+    render(A, undefined, { autoplay: true })
+    await loadStart()
+    await playbackState(true)
+    await load()
+    await release(0, MASTER_A) // A was already playing: no ready
+    render(B)
+    await loadStart()
+    await load()
+    expect(fetched()[2]).toBe(B) // held[1] is A's de.vtt, fetched by preferredText
+    await release(2, MASTER_B)
+
+    expect(states()).toEqual(['loading', 'playing', 'loading', 'ready'])
+    expect(ctx.state).toBe('ready')
   })
 })
