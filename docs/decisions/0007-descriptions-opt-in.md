@@ -1,7 +1,7 @@
-# 0007 — Description text tracks are opt-in: an omitted `kinds` means every kind except `descriptions`
+# 0007 — Description text tracks are opt-in, and an empty preference selects nothing
 
 **Date:** 2026-09-29
-**Status:** accepted — decided by the human (escalated under `docs/ORCHESTRATOR.md` §6, kit ↔ apps); amends 0003
+**Status:** accepted — decided by the human (escalated under `docs/ORCHESTRATOR.md` §6, kit ↔ apps); amends 0003; closes the KIT-014 question
 **Ticket:** KIT-014 (partly) · raised by the KIT-026 plan §9
 
 ## Context
@@ -27,7 +27,15 @@ a viewer asks for, never a side effect of choosing a caption language.
   default. No type changes.
 - `described` is unaffected: it always passes `kinds` (`packages/shared-ui/src/screens/Player.tsx:48`).
   `lingo` and `spot` do not use `preferredText` yet.
-- **Still open for KIT-014:** whether a present-but-empty preference — `preferredText={{}}` or
-  `{ languages: undefined }` — should select nothing (like an omitted prop) or, under this rule, every
-  non-description track in every language. The test marked *PINNED, NOT ENDORSED* in
-  `test/selection.test.ts` stays until that is decided.
+
+## Decision (2), 2026-09-29 — an empty preference selects nothing
+
+5. A present but **empty** preference — `preferredText={{}}`, `{ languages: undefined }`,
+   `{ kinds: undefined }`, or both keys `undefined` — selects **nothing**, exactly like an omitted
+   `preferredText`. Only a preference that names at least one of `languages` or `kinds` selects anything.
+   This closes the `preferredText={{ languages: userLangs }}` footgun where `userLangs` is still `undefined`
+   on first render and every caption language switched on at once.
+6. The rules compose: `{ languages: ['en'] }` → every `en` track except descriptions; `{ kinds: ['captions'] }`
+   → captions in any language; `{ languages: ['en'], kinds: ['descriptions'] }` → `en` descriptions only;
+   `{ kinds: [] }` / `{ languages: [] }` → nothing (0003).
+7. The test marked *PINNED, NOT ENDORSED* in `test/selection.test.ts` is replaced by tests for this rule.

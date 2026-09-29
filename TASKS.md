@@ -40,7 +40,7 @@ CI is green on every commit above (`test` + `harness` jobs) through `8ec1143`; a
 | KIT-013 | Web adapter labelled every text track `subtitles` | — | **closed** by KIT-002/003/004 for manifest tracks |
 | KIT-005 | Playwright harness for `CueOverlay` via the web adapter + CI job | Planner (opus*) → Implementer (opus) → Reviewer (opus*) → Implementer (opus) | **done** `ff7eac1` `d280dfa` |
 | KIT-008 | `docs/getting-started.md` + README to match the spike; changeset for 0.1.0 | Scribe (opus) ×2 | **done** `d36b2bc` |
-| KIT-014 | `preferredText={{}}` / `{ languages: undefined }` selects every text track | Planner (fable) → Implementer (opus) | not started — descriptions rule **decided** (decision 0007: omitted `kinds` excludes `descriptions`); the `{}` question is still open |
+| KIT-014 | `preferredText={{}}` / `{ languages: undefined }` selects every text track | Planner (fable) → Implementer (opus) | not started — **decided** (decision 0007: descriptions opt-in; empty preference selects nothing) |
 | KIT-011 | `selectedText` / `appliedPrefs` / scheduler never reset on `source` change | Planner (opus*) → Implementer (opus) ×2 → Reviewer (opus*) | **done** `8ec1143` (decision 0005) |
 | KIT-012 | Scheduler rebuilt on `onCue` identity change; `api` rebuilt every position tick | Implementer (opus) → Reviewer (opus*, shared with KIT-011) | **done** `8ec1143` |
 | KIT-015 | `onTracks` before `onState('ready')` as a kit-wide contract (web: emit `ready` from the join; Vega: publish before `ready`); then assert order in harness spec 11 | Planner → Implementer | not started (from KIT-005 review) |
@@ -71,8 +71,7 @@ were opened by the orchestrator from review findings; renumber if they collide w
 ## Waiting on the human
 
 1. ~~The `0001` gate~~ — recorded 2026-09-26 (decision 0001).
-2. **KIT-014** — descriptions are opt-in (decision 0007, 2026-09-29). Still open: should `preferredText={{}}` mean "nothing" (like an omitted prop) or "every non-description track" (like an
-   omitted key)? Pinned by a test marked *PINNED, NOT ENDORSED* until decided.
+2. ~~KIT-014~~ — decided 2026-09-29 (decision 0007): descriptions opt-in; an empty preference selects nothing. Pinned by a test marked *PINNED, NOT ENDORSED* until decided.
 3. **`described` migration** — app ticket, not kit work (decided 2026-09-18). Content is in decision 0004:
    stop passing the header; select by `(kind, language)` from `onTracks` instead of composing ids; add
    `hls_characteristics=public.accessibility.describes-video` to the descriptions stream in
