@@ -29,6 +29,7 @@ release notes in waiting.
 | 2026-09-27 | `95564b2` | **KIT-023** (+KIT-029, KIT-020 Fire OS) — per-load record cancels superseded Fire OS loads; `key={source.uri}` | 168 + 25 |
 | 2026-09-29 | `cb8bb1d` | **KIT-018** — Vega platform no-ops log once (`console.debug`, like Fire OS) with "experimental" + decision-0001 link; `test/platform-vega.test.ts` calls the real bindings | 177 + 25 |
 | 2026-09-29 | `415b019` | **KIT-015** + **KIT-028** — `onTracks` before `ready` on every adapter; the kit drops a `ready` after `playing`/`ended` and any state report from a superseded source (decision **0008**, human-approved); web reports `loading` and `ready` from the manifest join; harness spec 26 | 184 + 26 |
+| 2026-09-29 | `4140017` | **KIT-014** — an empty `preferredText` selects nothing; description text opt-in (decision 0007); real-KitPlayer tests + harness specs 27–29 (`master-d`) | 199 + 29 |
 
 CI is green on every commit above (`test` + `harness` jobs) through `8ec1143`; and on `da8041d` `39e637e` (2026-09-26), `cb8bb1d` `415b019` (2026-09-29). `main` == `origin/main`.
 
@@ -42,7 +43,7 @@ CI is green on every commit above (`test` + `harness` jobs) through `8ec1143`; a
 | KIT-013 | Web adapter labelled every text track `subtitles` | — | **closed** by KIT-002/003/004 for manifest tracks |
 | KIT-005 | Playwright harness for `CueOverlay` via the web adapter + CI job | Planner (opus*) → Implementer (opus) → Reviewer (opus*) → Implementer (opus) | **done** `ff7eac1` `d280dfa` |
 | KIT-008 | `docs/getting-started.md` + README to match the spike; changeset for 0.1.0 | Scribe (opus) ×2 | **done** `d36b2bc` |
-| KIT-014 | `preferredText={{}}` / `{ languages: undefined }` selects every text track | Planner (fable) → Implementer (opus) | not started — **decided** (decision 0007: descriptions opt-in; empty preference selects nothing) |
+| KIT-014 | `preferredText={{}}` / `{ languages: undefined }` selects every text track | Planner (fable) → Implementer (opus) → Reviewer (fable) → Implementer (opus) | **done** `4140017` (decision 0007) |
 | KIT-011 | `selectedText` / `appliedPrefs` / scheduler never reset on `source` change | Planner (opus*) → Implementer (opus) ×2 → Reviewer (opus*) | **done** `8ec1143` (decision 0005) |
 | KIT-012 | Scheduler rebuilt on `onCue` identity change; `api` rebuilt every position tick | Implementer (opus) → Reviewer (opus*, shared with KIT-011) | **done** `8ec1143` |
 | KIT-015 | `onTracks` before `onState('ready')` as a kit-wide contract (web: emit `ready` from the join; Vega: publish before `ready`); then assert order in harness spec 11 | Planner → Implementer | **done** `415b019` — decision 0008; plan `docs/plans/KIT-015-tracks-before-ready.md` |
@@ -73,7 +74,7 @@ were opened by the orchestrator from review findings; renumber if they collide w
 ## Waiting on the human
 
 1. ~~The `0001` gate~~ — recorded 2026-09-26 (decision 0001).
-2. ~~KIT-014~~ — decided 2026-09-29 (decision 0007): descriptions opt-in; an empty preference selects nothing. The *PINNED, NOT ENDORSED* test in `test/selection.test.ts` is replaced when KIT-014 is implemented.
+2. ~~KIT-014~~ — decided 2026-09-29 (decision 0007): descriptions opt-in; an empty preference selects nothing. Implemented in `4140017`.
 3. **`described` migration** — app ticket, not kit work (decided 2026-09-18). Content is in decision 0004:
    stop passing the header; select by `(kind, language)` from `onTracks` instead of composing ids; add
    `hls_characteristics=public.accessibility.describes-video` to the descriptions stream in
@@ -220,9 +221,10 @@ KIT-022 (before 0.1.0). Same-class defects: Fire OS (KIT-023, high), Vega scaffo
 ### KIT-014
 A *present but empty* preference selects **every** text track, descriptions included, because "omitted key
 means any" (decision 0003). `preferredText={{ languages: userLangs }}` with `userLangs === undefined` therefore
-turns on every language at once — the KIT-009 footgun one level up. Behaviour is pinned by
-`test/selection.test.ts › pins that a present-but-empty preference selects every track`. Semantic change;
-the human decides.
+turns on every language at once — the KIT-009 footgun one level up. **Done** `4140017` (decision 0007): only a
+preference naming `languages` or `kinds` selects anything, and an omitted `kinds` leaves `descriptions` out;
+`pickText(tracks)` with no preference now returns `[]` too (0007 Consequences). Review nit left open: `metadata`
+kind stays auto-selectable when `kinds` is omitted — only reachable via Shaka (Vega); revisit in KIT-010.
 
 ### KIT-011
 `KitPlayer.tsx`: `appliedPrefs`, `selectedText` and the scheduler's tracks are never reset when `props.source`
