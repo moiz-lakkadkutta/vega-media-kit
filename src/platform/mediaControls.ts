@@ -1,6 +1,6 @@
 import { Platform } from 'react-native'
 import { isVega } from './os'
-import { DOCS, warnOnce } from './log'
+import { DOCS, VEGA_DOCS, VEGA_EXPERIMENTAL, warnOnce } from './log'
 import type { TransportControl } from './contentLauncher'
 
 export interface NowPlaying { title: string; subtitle?: string; artworkUrl?: string; durationS?: number; positionS?: number; playing: boolean }
@@ -12,7 +12,11 @@ export interface NowPlaying { title: string; subtitle?: string; artworkUrl?: str
  */
 export const mediaControls = {
   setNowPlaying(meta: NowPlaying): void {
-    if (isVega()) { /* TODO(spike KIT-007) VegaMediaControl */ return }
+    if (isVega()) {
+      // TODO(spike KIT-007) VegaMediaControl
+      warnOnce('mediaControls.setNowPlaying', Platform.OS, VEGA_DOCS, VEGA_EXPERIMENTAL)
+      return
+    }
     warnOnce('mediaControls.setNowPlaying', Platform.OS, DOCS)
     void meta
   },

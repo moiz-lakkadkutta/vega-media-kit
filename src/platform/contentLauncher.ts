@@ -1,6 +1,6 @@
 import { Platform } from 'react-native'
 import { isVega } from './os'
-import { DOCS, warnOnce } from './log'
+import { DOCS, VEGA_DOCS, VEGA_EXPERIMENTAL, warnOnce } from './log'
 
 export interface CatalogItem {
   id: string
@@ -28,6 +28,7 @@ export const contentLauncher = {
     if (isVega()) {
       // TODO(spike KIT-007): confirm import + API from vega-video-sample's Content Launcher integration.
       // const { ContentLauncherServer } = require('@amazon-devices/kepler-media-content-launcher')
+      warnOnce('contentLauncher.registerCatalog', Platform.OS, VEGA_DOCS, VEGA_EXPERIMENTAL)
       return
     }
     warnOnce('contentLauncher.registerCatalog', Platform.OS, DOCS)

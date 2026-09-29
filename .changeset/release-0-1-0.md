@@ -18,6 +18,8 @@
 
 **Vega: experimental, not device-verified.** 0.1.0 is verified on Fire OS (Fire TV Stick, Fire OS 7.7.1.6: playback, audio switch, two text tracks, seek / pause / 0.75×, own HLS via CloudFront — see `docs/device-matrix.md`); web is covered by the Playwright harness in CI. The Vega adapter and Vega platform bindings compile and are exported but have not run on a Vega device or the Vega Virtual Device, and carry no support promise in this release: the adapter does not play video as written — its rewrite onto `VideoPlayer` + `KeplerVideoSurfaceView` (decision 0002) is deferred, as are the Vega platform bindings, which are no-ops today. See `docs/decisions/0001-week0-gates.md`.
 
+**Vega: platform no-ops say so, once.** On Vega, `contentLauncher.registerCatalog`, `personalization.reportPlayback` / `setWatchlist`, `mediaControls.setNowPlaying` and `parentalControls.isRestricted` / `requestPin` were silent no-ops. Each now logs once per binding (at debug level, like the Fire OS no-ops) that it is a no-op because Vega support is experimental and not device-verified, with a link to `docs/decisions/0001-week0-gates.md`, and then returns exactly as before. The Fire OS and web messages are unchanged. `warnOnce` takes an optional fourth argument, the reason appended to the message.
+
 **Vega `mapKey` aliases.** `mapKey` learns the Vega `TVEventHandler` names `playpause`, `skip_backward` and `skip_forward`.
 
 **Deprecated: `source.headers['x-kit-text-urls']`.** Still honoured as an override for one release — merged by id after the manifest tracks — and warns once; removed in the next minor. Select text tracks by the ids reported in `onTracks` instead.

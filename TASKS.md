@@ -27,6 +27,7 @@ release notes in waiting.
 | 2026-09-27 | `4551812` | **KIT-022** — `handleTracks` refuses reports from a superseded source; real-KitPlayer jsdom test + harness spec 25 | 159 + 25 |
 | 2026-09-27 | `332d371` | **KIT-031** — docs: Vega experimental, not device-verified | 159 + 25 |
 | 2026-09-27 | `95564b2` | **KIT-023** (+KIT-029, KIT-020 Fire OS) — per-load record cancels superseded Fire OS loads; `key={source.uri}` | 168 + 25 |
+| 2026-09-29 | KIT-018 commit | **KIT-018** — Vega platform no-ops log once (`console.debug`, like Fire OS) with "experimental" + decision-0001 link; `test/platform-vega.test.ts` calls the real bindings | 177 + 25 |
 
 CI is green on every commit above (`test` + `harness` jobs) through `8ec1143`; and on `da8041d` `39e637e` (2026-09-26). `main` == `origin/main`.
 
@@ -59,7 +60,7 @@ CI is green on every commit above (`test` + `harness` jobs) through `8ec1143`; a
 | KIT-030 | `parseVtt` timestamps are float sums (`src/core/vtt.ts:26` → `3.8369999999999997`); compare with a tolerance or round to ms | Implementer (opus) | not started (from Fire OS spike, low) |
 | KIT-031 | README `## Status`, `docs/getting-started.md` Vega section and the 0.1.0 changeset say "Vega: experimental, not device-verified" (decision 0001) | Scribe (opus) | **done** `332d371` |
 | KIT-021 | `CueScheduler.setTrack` with the same cue ids but different text emits no change (`scheduler.ts:48`) — stale text after a same-id re-fetch or live refresh | Implementer (opus) | not started (from KIT-011 review) |
-| KIT-018 | Vega platform bindings are *silent* no-ops: every `if (isVega()) return` precedes `warnOnce` (`mediaControls.ts:15`, `contentLauncher.ts:28`, `personalization.ts:8,16`, `parentalControls.ts:8`) — violates "every no-op warns once with a doc link" until KIT-007 lands | Implementer (opus) | not started (from KIT-008) |
+| KIT-018 | Vega platform bindings are *silent* no-ops: every `if (isVega()) return` precedes `warnOnce` (`mediaControls.ts:15`, `contentLauncher.ts:28`, `personalization.ts:8,16`, `parentalControls.ts:8`) — violates "every no-op warns once with a doc link" until KIT-007 lands | Implementer (opus) | **done** (this commit) — `requestPin` also gained its Vega branch |
 | KIT-007 | Vega platform bindings (Content Launcher, Personalization, Media Controls, Parental Controls) | Spike → Planner → Implementer | **deferred** — Vega experimental (decision 0001) |
 | KIT-010 | Rewrite the Vega adapter onto `VideoPlayer` class + `KeplerVideoSurfaceView` | Planner (fable) → Implementer (opus) → Reviewer (fable) | **deferred** — Vega experimental (decision 0001) |
 

@@ -1,6 +1,6 @@
 # Platform bindings
 
-The Vega column is the intended backing and is **not implemented**: on Vega every binding is a no-op today (KIT-007 deferred, Vega experimental — [decision 0001](decisions/0001-week0-gates.md)), and those no-ops are silent until KIT-018.
+The Vega column is the intended backing and is **not implemented**: on Vega every binding is a no-op today (KIT-007 deferred, Vega experimental — [decision 0001](decisions/0001-week0-gates.md)). Each Vega no-op logs once, naming Vega as experimental and linking decision 0001.
 
 | Module | Vega (planned, KIT-007) | Fire OS |
 |---|---|---|
@@ -10,4 +10,4 @@ The Vega column is the intended backing and is **not implemented**: on Vega ever
 | `parentalControls.isRestricted / requestPin` | Vega Parental Controls (VVD ≥ 0.24) | no-op (system PIN) |
 | `useRemote` | RNV key events | Android TV key events |
 
-Every no-op on Fire OS and web logs once at debug level with a link here; on Vega they do not yet (KIT-018). Those logs are the raw material for the hackathon's product-feedback section.
+Every no-op on Fire OS and web logs once at debug level with a link here; on Vega each logs once at debug level, says Vega is experimental and links [decision 0001](decisions/0001-week0-gates.md). Those logs are the raw material for the hackathon's product-feedback section.

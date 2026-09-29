@@ -44,7 +44,7 @@ export function Player() {
 | `core` | `Cue`, `AudioTrack`, `TextTrack` types · WebVTT parser/serializer (`<v Speaker>`, `[sounds]`, `<i>`, trailing `{k=v}` meta) · `CueScheduler` (position-driven active-cue set, seek-safe) · track normalization from Shaka and ExoPlayer · HLS master-playlist parser (`parseHlsMaster`) · `lintCues` (Netflix Timed Text limits: 2 lines × 42 chars, 20 cps) · **no React Native imports** — runs in Node and in media pipelines |
 | `player` | `<KitPlayer>` + adapters for Fire OS, web and Vega (experimental). Text tracks come from the HLS master playlist (`#EXT-X-MEDIA:TYPE=SUBTITLES`; `CHARACTERISTICS` decides captions vs descriptions) and are reported through `onTracks`. `selectText([...])` takes **multiple** tracks. Cues arrive from the adapter or from the kit's scheduler over fetched VTT — the app can't tell which |
 | `cues` | `<CueOverlay>` with 10-foot defaults (5 % safe zone, 44 px primary / 32 px secondary at 1080p, boxed off-white text), speaker/sound rendering, `selectable` word focus |
-| `platform` | `contentLauncher`, `personalization`, `mediaControls`, `parentalControls`, `useRemote` (typed keys, long-press). No-ops warn once with a doc link on Fire OS and web; on Vega they are silent no-ops today (KIT-018) |
+| `platform` | `contentLauncher`, `personalization`, `mediaControls`, `parentalControls`, `useRemote` (typed keys, long-press). No-ops warn once with a doc link on Fire OS and web; on Vega each no-op warns once that Vega is experimental, linking decision 0001 |
 | `focus` | `useFocusMemory`, `useDpad` (key-repeat throttle), `FocusRow` |
 
 ## Status
@@ -53,7 +53,7 @@ Pre-release (`0.1.0-alpha.0`). `core` is implemented and tested (159 vitest case
 
 - **Fire OS — primary, device-verified.** Fire TV Stick (`AFTSS`, Fire OS 7.7.1.6), 2026-09-26: playback, audio switch, two text tracks at once, seek / pause / 0.75×, and our own HLS package from CloudFront. Results and open defects in [docs/device-matrix.md](docs/device-matrix.md).
 - **Web — supported.** Exercised in CI by a Playwright harness (`pnpm harness`: 25 specs that render the real `CueOverlay` and `KitPlayer` against a real `<video>` in Chromium). It is the CI guard of record.
-- **Vega — experimental, not device-verified.** The Vega adapter and platform bindings compile and are exported; nothing has been run on a Vega device or the Vega Virtual Device. The adapter does not work as written: the rewrite onto the `VideoPlayer` class and `KeplerVideoSurfaceView` (KIT-010, decision 0002) and the platform bindings (KIT-007) are deferred. The Vega bindings are no-ops today (KIT-018 will make each warn once). No support promise in 0.1.0 — see [decision 0001](docs/decisions/0001-week0-gates.md).
+- **Vega — experimental, not device-verified.** The Vega adapter and platform bindings compile and are exported; nothing has been run on a Vega device or the Vega Virtual Device. The adapter does not work as written: the rewrite onto the `VideoPlayer` class and `KeplerVideoSurfaceView` (KIT-010, decision 0002) and the platform bindings (KIT-007) are deferred. The Vega bindings are no-ops today, and each one logs once (debug level) that Vega is experimental, with a link to decision 0001. No support promise in 0.1.0 — see [decision 0001](docs/decisions/0001-week0-gates.md).
 
 ## Docs
 
