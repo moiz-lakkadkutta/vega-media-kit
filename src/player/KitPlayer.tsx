@@ -83,9 +83,9 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
         appliedPrefs.current = true
         const a = pickAudio(t.audio, props.preferredAudio)
         if (a) adapterRef.current.selectAudio(a.id)
-        // No `preferredText` means text off, never "every track": TV convention is captions off until
-        // asked for, and an omitted preference must not stack every language and description at once.
-        // The decision itself lives in `autoSelectedTextIds` so it is tested in one place.
+        // No `preferredText` — or an empty one — means text off, never "every track": TV convention is captions
+        // off until asked for, and description text is opt-in (decisions 0003, 0007). The decision itself lives
+        // in `autoSelectedTextIds` so it is tested in one place.
         const tx = autoSelectedTextIds(t.text, props.preferredText)
         if (tx.length) selectText(tx)
       }

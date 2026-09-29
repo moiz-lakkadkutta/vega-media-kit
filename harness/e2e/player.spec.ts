@@ -14,6 +14,8 @@ import { cueIds, deferred, events, metadataLoaded, routeStream } from './helpers
  * update lane — a DefaultLane switch still runs the adapter's passive cleanup inside the switch's commit.
  * Specs 10–11 (KIT-015): `ready` is reported from the join, after `onTracks`; spec 26 (KIT-028): the kit drops a
  * `ready` that would overwrite `playing`.
+ * Specs 27–29 (KIT-014, decision 0007): an empty `preferredText` selects nothing; description text is selected
+ * only when `kinds` names it; `selectText` with its id still delivers it.
  */
 const BASE = 'http://localhost:4173'
 const trackEvents = (page: Page) => events(page).then((e) => e.filter((x) => x.type === 'tracks'))
@@ -34,6 +36,8 @@ const MANIFEST_TRACKS = [
 ]
 /** Stream B (`master-b`): the same ids '0'/'1' on purpose (ids are ordinals, decision 0004), different cue text. */
 const MANIFEST_TRACKS_B = MANIFEST_TRACKS.map((t) => ({ ...t, url: t.url.replace('/stream/subs/', '/stream/subs-b/') }))
+/** Stream D (`master-d`): stream A's two subtitle tracks plus an English audio-description rendition (KIT-014). */
+const MANIFEST_TRACKS_D = [...MANIFEST_TRACKS, { id: '2', language: 'en', label: 'Audio description', kind: 'descriptions', active: false, url: `${BASE}/stream/subs-d/en-ad/index.m3u8` }]
 const cueText = (page: Page, t: number) => page.evaluate((t) => window.__kit.seek(t).map((c) => c.text), t)
 /** Switch the page's source and return exactly the events the switch itself logged (setSource is synchronous). */
 const setSource = (page: Page, uri: string) =>
@@ -384,4 +388,41 @@ test("ready does not overwrite playing: a load whose manifest lands after play()
   expect(await page.evaluate(() => window.__kit.state())).toBe('playing')
   const states = (await events(page)).filter((x) => x.type === 'state')
   expect(states.at(-1)).toEqual({ type: 'state', state: 'playing' })
+})
+
+test('preferredText={} selects nothing: no subtitle fetch and no cue; an explicit selectText still works (KIT-014)', async ({ page }) => {
+  const hits = await routeStream(page)
+  await page.goto('/player.html?preferred=' + encodeURIComponent('{}'))
+  await waitForTracks(page)
+  await expect.poll(() => hasState(page, 'ready')).toBe(true)
+  expect(await cueIds(page, 2)).toEqual([])
+  // No sleep: the explicit selection of '1' (en) is the sync point. A wrongly auto-selected track would have been
+  // fetched at onTracks, strictly before this selectText, so by the time en's cue lands its fetch is in `hits`.
+  await selectText(page, ['1'])
+  await expect.poll(() => cueIds(page, 2)).toEqual(['1:c1'])
+  const subs = hits.filter((h) => h.startsWith('fetch subs/'))
+  expect(subs.length).toBeGreaterThan(0)
+  expect(subs.filter((h) => !h.startsWith('fetch subs/en/'))).toEqual([]) // same as `every(en)`, but prints the stray hits
+})
+
+test('preferredText={languages:["en"]} leaves the descriptions rendition out; selectText with its id still delivers it alongside (0007)', async ({ page }) => {
+  const hits = await routeStream(page)
+  // Encoded: a literal `/stream/` in the query would make routeStream's `**/stream/**` glob swallow the page itself.
+  await page.goto('/player.html?src=' + encodeURIComponent('/stream/master-d') + '&preferred=' + encodeURIComponent('{"languages":["en"]}'))
+  await waitForTracks(page)
+  const [t] = await trackEvents(page)
+  expect(t!.type === 'tracks' && t!.tracks.text).toEqual(MANIFEST_TRACKS_D)
+  await expect.poll(() => cueIds(page, 2)).toEqual(['1:c1'])
+  expect(hits.filter((h) => h.startsWith('fetch subs-d/'))).toEqual([])
+  await selectText(page, ['1', '2'])
+  await expect.poll(() => cueIds(page, 2).then((ids) => ids.sort())).toEqual(['1:c1', '2:c1'])
+  expect(await cueText(page, 2)).toContain('A door opens')
+})
+
+test('preferredText={kinds:["descriptions"]} selects the descriptions rendition alone (0007 §2)', async ({ page }) => {
+  const hits = await routeStream(page)
+  await page.goto('/player.html?src=' + encodeURIComponent('/stream/master-d') + '&preferred=' + encodeURIComponent('{"kinds":["descriptions"]}'))
+  await waitForTracks(page)
+  await expect.poll(() => cueIds(page, 2)).toEqual(['2:c1'])
+  expect(hits.filter((h) => h.startsWith('fetch subs/'))).toEqual([])
 })

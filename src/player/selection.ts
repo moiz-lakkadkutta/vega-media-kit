@@ -53,14 +53,10 @@ export interface TextPreference {
 /**
  * The `preferredText` auto-selection decision, in one tested place.
  *
- * An absent preference selects nothing. This is load-bearing, not defensive: `pickText(tracks, undefined)`
- * returns *every* track by deliberate contract (docs/decisions/0003-text-selection-defaults.md), so
- * delegating an absent preference straight to `pickText` would stack every language and description at
- * once for any app that simply omits the prop. TV convention is captions off until asked for.
- *
- * A *present* preference delegates to `pickText` unchanged, including its documented "omitted key means
- * any" rule — so `{}` and `{ languages: undefined }` select every track. That is the rule's consequence,
- * not a decision made here; the tests pin it so it stays visible.
+ * An absent preference selects nothing, and so does a present-but-empty one (`{}`, `{ languages: undefined }`):
+ * `pickText` returns `[]` for both since decision 0007, and the explicit guard here keeps the player independent
+ * of `pickText`'s semantics (0003 §3). Everything else is `pickText`'s contract: `[]` means none, an omitted
+ * `languages` means any language, an omitted `kinds` means every kind except `descriptions`.
  */
 export function autoSelectedTextIds(text: readonly TextTrack[], pref?: TextPreference): string[] {
   if (!pref) return []

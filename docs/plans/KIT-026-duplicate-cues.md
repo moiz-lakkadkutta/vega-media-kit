@@ -67,7 +67,7 @@ for free; it is not why anything rendered twice.
 `preferredText={{ languages: ['fr', 'en'] }}` with `kinds` omitted: `autoSelectedTextIds`
 (`src/player/selection.ts:65-68`) → `pickText` (`src/core/tracks.ts:133-142`) matches **every** `en` track,
 and all three spike tracks (captions `'0'`, SDH `'1'`, descriptions `'2'`) are `en`. So the kit selected
-`['0','1','2']` on the first `onTracks` — decision 0003's "an omitted key means any", by design. The harness HUD
+`['0','1','2']` on the first `onTracks` — decision 0003's "an omitted key means any", by design (superseded by decision 0007). The harness HUD
 seeded `selText` from the *first* track per language (`KitSpikeScreen.tsx:57`, `t.text.find(...)`), i.e. `['0']`,
 so the checkboxes lied about what the kit had selected. That is the harness artefact.
 

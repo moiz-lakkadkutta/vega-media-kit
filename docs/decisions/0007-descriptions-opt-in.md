@@ -27,6 +27,10 @@ a viewer asks for, never a side effect of choosing a caption language.
   default. No type changes.
 - `described` is unaffected: it always passes `kinds` (`packages/shared-ui/src/screens/Player.tsx:48`).
   `lingo` and `spot` do not use `preferredText` yet.
+- Rule 5 applies to `pickText`'s own argument too (KIT-014 implementation, 2026-09-29): `pickText(tracks)` and
+  `pickText(tracks, undefined)` return `[]`, like `pickText(tracks, {})`. This reverses what the unreleased 0.1.0
+  changeset used to promise ("returns every track unfiltered"); keeping `undefined` ≠ `{}` would have reopened the
+  footgun 0003 §3 closed for direct callers. No known caller relied on it.
 
 ## Decision (2), 2026-09-29 — an empty preference selects nothing
 

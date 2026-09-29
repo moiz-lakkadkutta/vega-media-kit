@@ -1,4 +1,5 @@
 import { fromShakaVariants, fromShakaText, fromRnvAudio, pickAudio, pickText, normalizeRoles, textKindFromRoles, textKindFromLabel } from '../src/core'
+import type { TextTrack } from '../src/core'
 
 describe('tracks', () => {
   it('collapses Shaka variants to unique audio streams and maps description role', () => {
@@ -55,17 +56,43 @@ describe('tracks', () => {
     expect(pickText(t, { kinds: [], languages: ['en'] })).toEqual([])
     expect(pickText(t, { kinds: ['captions'], languages: [] })).toEqual([])
   })
-  it('treats an omitted kinds or languages key as "any", and an omitted preference as no filter', () => {
-    const t = fromShakaText([
-      { id: 1, language: 'en', kind: 'caption', active: false },
-      { id: 2, language: 'de', kind: 'subtitle', active: false },
-      { id: 3, language: 'en', roles: ['description'], active: false },
-    ])
-    expect(pickText(t, { languages: ['en'] }).map((x) => x.id)).toEqual(['1', '3']) // any kind
-    expect(pickText(t, { kinds: ['captions'] }).map((x) => x.id)).toEqual(['1']) // any language
-    expect(pickText(t, {})).toEqual(t)
-    // No preference filters nothing; KitPlayer guards the absent `preferredText` itself.
-    expect(pickText(t, undefined)).toEqual(t)
+  describe('pickText preference semantics (decision 0007)', () => {
+    const three = () =>
+      fromShakaText([
+        { id: 1, language: 'en', kind: 'caption', active: false },
+        { id: 2, language: 'de', kind: 'subtitle', active: false },
+        { id: 3, language: 'en', roles: ['description'], active: false },
+      ])
+    const id = (x: TextTrack) => x.id
+
+    it('selects nothing for an absent or empty preference — only a named key selects (0007 §5)', () => {
+      const t = three()
+      expect(pickText(t)).toEqual([])
+      expect(pickText(t, undefined)).toEqual([])
+      expect(pickText(t, {})).toEqual([])
+      expect(pickText(t, { languages: undefined })).toEqual([])
+      expect(pickText(t, { kinds: undefined })).toEqual([])
+      expect(pickText(t, { languages: undefined, kinds: undefined })).toEqual([])
+    })
+    it('leaves descriptions out when kinds is omitted and includes them only when named (0007 §1–2)', () => {
+      const t = three()
+      expect(pickText(t, { languages: ['en'] }).map(id)).toEqual(['1'])
+      expect(pickText(t, { languages: ['en'], kinds: ['descriptions'] }).map(id)).toEqual(['3'])
+      expect(pickText(t, { kinds: ['descriptions'] }).map(id)).toEqual(['3'])
+      expect(pickText(t, { kinds: ['captions', 'descriptions'] }).map(id)).toEqual(['1', '3'])
+    })
+    it('an omitted languages still means any language, and the language list still orders the result (0007 §6)', () => {
+      const t = three()
+      expect(pickText(t, { kinds: ['captions'] }).map(id)).toEqual(['1'])
+      expect(pickText(t, { kinds: ['subtitles', 'captions'] }).map(id)).toEqual(['1', '2'])
+      expect(pickText(t, { languages: ['de', 'en'] }).map(id)).toEqual(['2', '1'])
+    })
+    it('never mutates the caller’s array', () => {
+      // A guard, not a fix: `pickText` sorts only the array its language filter just built, never its input.
+      const t = three()
+      pickText(t, { languages: ['de', 'en'] })
+      expect(t.map(id)).toEqual(['1', '2', '3'])
+    })
   })
   it('defaults unknown roles to main', () => {
     expect(normalizeRoles(['weird'])).toEqual(['main'])

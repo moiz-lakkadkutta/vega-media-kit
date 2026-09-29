@@ -1,7 +1,7 @@
 # 0003 — `preferredText` selects nothing by default; an empty array means "none"
 
 **Date:** 2026-09-15 (week 0)
-**Status:** accepted — decided by the human, escalated under `docs/ORCHESTRATOR.md` §6 (kit ↔ apps)
+**Status:** accepted — decided by the human, escalated under `docs/ORCHESTRATOR.md` §6 (kit ↔ apps); amended by 0007 (an omitted `kinds` excludes `descriptions`; a present-but-empty preference selects nothing)
 **Ticket:** KIT-009
 
 ## Context

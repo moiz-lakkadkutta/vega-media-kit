@@ -38,8 +38,11 @@ Select by the ids the kit reports — never by ids your app composes:
 ref.current?.selectText(text.filter((x) => x.kind === 'captions' || x.kind === 'descriptions').map((x) => x.id))
 ```
 
-Text stays off until something asks for it: no `preferredText` means no track is selected, and `{ kinds: [] }`
-is how an app says "captions off". Ids are manifest ordinals (`'0'`, `'1'`, …) in playlist order.
+Text stays off until something asks for it: no `preferredText` means no track is selected, and so does an empty
+one — `{}` or `{ languages: undefined }` (the shape you get before user settings have loaded). `{ kinds: [] }` is
+how an app says "captions off". When `kinds` is omitted, audio-description text tracks are left out:
+`{ languages: ['en'] }` selects English subtitles and captions, and `kinds: ['descriptions']` is how an app turns
+description text on (decisions 0003, 0007). Ids are manifest ordinals (`'0'`, `'1'`, …) in playlist order.
 
 The kit does not parse DASH manifests, encrypted or byte-range playlists, or live/EVENT refreshes; a source
 that is already a media playlist simply reports no text tracks. If the master playlist cannot be fetched

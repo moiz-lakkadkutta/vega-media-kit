@@ -120,20 +120,29 @@ export function pickAudio(tracks: AudioTrack[], pref?: { language?: string; role
   return byLang[0] ?? byRole[0] ?? tracks.find((t) => t.roles.includes('main')) ?? tracks[0]
 }
 
+type TextPref = { languages?: string[]; kinds?: TextKind[] }
+/** True when the preference names at least one key. An explicit `[]` counts; an absent or `undefined` key does not. */
+function namesAnything(pref: TextPref | undefined): pref is TextPref {
+  return pref != null && (pref.languages != null || pref.kinds != null)
+}
+
 /**
- * Filter text tracks by preference, ordered by the caller's language list.
+ * Filter text tracks by preference, ordered by the caller's language list (decisions 0003 and 0007).
  *
- * An empty array is an explicit choice, not an absent one: `kinds: []` matches no kind and
- * `languages: []` matches no language, so either yields `[]` — that is how an app says "captions off".
- * An omitted key means "any": `{ languages: ['de'] }` still matches every kind, and `{ kinds: ['captions'] }`
- * every language. An omitted `pref` filters nothing and returns all tracks, so callers that must not
- * select anything without an explicit preference (KitPlayer's `preferredText` auto-selection) check for
- * the absent preference themselves rather than leaning on this.
+ * Only a preference that names at least one of `languages` or `kinds` selects anything. An absent preference and a
+ * present-but-empty one (`{}`, `{ languages: undefined }`, `{ kinds: undefined }`) both return `[]`: text stays off
+ * until something asks for it, so an app that builds the object before its settings have loaded
+ * (`{ languages: userLangs }` with `userLangs` still undefined) turns nothing on by accident.
+ *
+ * An empty array is an explicit choice: `kinds: []` and `languages: []` each match nothing — that is how an app says
+ * "captions off". An omitted `languages` means any language. An omitted `kinds` means every kind *except*
+ * `descriptions`: audio-description text is something a viewer asks for (`kinds: ['descriptions']`), never a side
+ * effect of choosing a caption language. Never mutates `tracks`.
  */
 export function pickText(tracks: TextTrack[], pref?: { languages?: string[]; kinds?: TextKind[] }): TextTrack[] {
-  let out = tracks
-  if (pref?.kinds) out = out.filter((t) => pref.kinds!.includes(t.kind))
-  if (pref?.languages) {
+  if (!namesAnything(pref)) return []
+  let out = pref.kinds ? tracks.filter((t) => pref.kinds!.includes(t.kind)) : tracks.filter((t) => t.kind !== 'descriptions')
+  if (pref.languages) {
     const wanted = pref.languages.map((l) => l.toLowerCase())
     out = out.filter((t) => wanted.some((w) => t.language.toLowerCase().startsWith(w)))
     out.sort((a, b) => wanted.findIndex((w) => a.language.toLowerCase().startsWith(w)) - wanted.findIndex((w) => b.language.toLowerCase().startsWith(w)))

@@ -24,6 +24,13 @@ export interface KitPlayerProps {
   autoplay?: boolean
   startAt?: number
   preferredAudio?: { language?: string; role?: AudioRole }
+  /**
+   * Text auto-selection, applied on each source's first `onTracks` (decisions 0003, 0007). Selects only when at
+   * least one key is named: omitted, `{}` and `{ languages: undefined }` all select nothing. `kinds: []` or
+   * `languages: []` means none (captions off). An omitted `languages` means any language; an omitted `kinds` means
+   * every kind except `descriptions` — name `kinds: ['descriptions']` to turn description text on. Every matching
+   * track is selected (two languages at once is the point); `selectText([...ids])` always wins afterwards.
+   */
   preferredText?: { languages?: string[]; kinds?: TextKind[] }
   /** Called ≤ 4 Hz. */
   onPosition?(seconds: number): void

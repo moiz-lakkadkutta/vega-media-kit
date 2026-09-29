@@ -155,6 +155,41 @@ describe('text selection state', () => {
     expect(h.emitted).toEqual([])
   })
 
+  it('auto-selects nothing for a present-but-empty preferredText: the adapter is not told, VTT is dropped, no cue is emitted', () => {
+    for (const pref of [{}, { languages: undefined }] as TextPreference[]) {
+      const h = harness()
+      h.handleTracks([track('de', 'de'), track('en', 'en'), track('ad', 'en', 'descriptions')], pref)
+      expect(h.selectedIds()).toEqual([])
+      expect(h.adapterCalls).toEqual([])
+      for (const id of ['de', 'en', 'ad']) expect(h.handleTextTrackData(id, id)).toBe(false)
+      expect(h.scheduler.tracks).toEqual([])
+      h.tick(2)
+      expect(h.emitted).toEqual([])
+    }
+  })
+
+  it('a source change re-applies an empty preferredText as nothing, not as every track', () => {
+    const h = harness()
+    h.handleTracks([track('de', 'de'), track('en', 'en'), track('ad', 'en', 'descriptions')], {})
+    h.changeSource('B')
+    h.handleTracks([track('0', 'en'), track('1', 'de')], {})
+    expect(h.selectedIds()).toEqual([])
+    expect(h.adapterCalls).toEqual([])
+  })
+
+  it('selectText with a description id is honoured after an empty preference selected nothing', () => {
+    const h = harness()
+    h.handleTracks([track('de', 'de'), track('en', 'en'), track('ad', 'en', 'descriptions')], {})
+    h.selectText(['ad'])
+    expect(h.handleTextTrackData('ad', 'x')).toBe(true)
+    h.tick(2)
+    expect(h.emitted.at(-1)).toEqual(['ad:c1'])
+    h.selectText(['de', 'ad'])
+    expect(h.handleTextTrackData('de', 'Hallo')).toBe(true)
+    h.tick(2.5)
+    expect(h.emitted.at(-1)).toEqual(['ad:c1', 'de:c1'])
+  })
+
   it('captions-off ({ kinds: [] }) selects nothing, so every fetched VTT is dropped and no cue is emitted', () => {
     // The shape the consuming app passes when its caption preference is 'off':
     // preferredText={{ kinds: captionKind === 'off' ? [] : [captionKind] }}
@@ -303,7 +338,8 @@ describe('acceptsTextTrackData', () => {
 /**
  * The auto-selection decision on its own. These run against the same function KitPlayer calls, so
  * unlike the harness tests above they fail if the decision itself changes — including the absent-preference
- * guard, which `pickText` cannot provide: `pickText(tracks, undefined)` returns every track on purpose.
+ * guard, which stays even though `pickText` now returns `[]` for an absent or empty preference too
+ * (0003 §3, 0007 §5).
  */
 describe('autoSelectedTextIds', () => {
   const text = () => [track('de', 'de'), track('en', 'en'), track('ad', 'en', 'descriptions')]
@@ -323,14 +359,17 @@ describe('autoSelectedTextIds', () => {
     expect(autoSelectedTextIds(two, { languages: ['en', 'de'] })).toEqual(['en', 'de'])
   })
 
-  // PINNED, NOT ENDORSED. A present-but-empty preference selects EVERY track, because `pickText` reads an
-  // omitted key as "any" (see pickText's doc comment and docs/decisions/0003-text-selection-defaults.md).
-  // An app building the object dynamically — `{ languages: userLangs }` with `userLangs` undefined — lands
-  // here. These tests record the behaviour so a change to it is a visible decision, not an accident.
-  it('pins that a present-but-empty preference selects every track', () => {
-    expect(autoSelectedTextIds(text(), {})).toEqual(['de', 'en', 'ad'])
-    expect(autoSelectedTextIds(text(), { languages: undefined })).toEqual(['de', 'en', 'ad'])
-    expect(autoSelectedTextIds(text(), { languages: undefined, kinds: undefined })).toEqual(['de', 'en', 'ad'])
+  it('selects nothing for a present-but-empty preference: {}, { languages: undefined }, { kinds: undefined }, both undefined (0007 §5)', () => {
+    expect(autoSelectedTextIds(text(), {})).toEqual([])
+    expect(autoSelectedTextIds(text(), { languages: undefined })).toEqual([])
+    expect(autoSelectedTextIds(text(), { kinds: undefined })).toEqual([])
+    expect(autoSelectedTextIds(text(), { languages: undefined, kinds: undefined })).toEqual([])
+  })
+
+  it('leaves the descriptions track out when kinds is omitted and selects it only when named (0007 §1–2)', () => {
+    expect(autoSelectedTextIds(text(), { languages: ['en'] })).toEqual(['en'])
+    expect(autoSelectedTextIds(text(), { languages: ['en'], kinds: ['descriptions'] })).toEqual(['ad'])
+    expect(autoSelectedTextIds(text(), { kinds: ['descriptions'] })).toEqual(['ad'])
   })
 
   it('does not reorder or otherwise mutate the caller’s track list', () => {
@@ -354,8 +393,9 @@ describe('KitPlayer wiring', () => {
     // Same spirit as the assertion above, for the other half of the wiring. The absent-preference guard
     // used to be an inline ternary in the component, where no test could reach it — dropping it silently
     // auto-selected every text track. It is now a tested function, so what has to be guarded at source is
-    // that the component still calls it, and does not reach for `pickText` (which selects everything when
-    // handed no preference) again.
+    // that the component still calls it, and does not reach for `pickText` directly — the absent-preference
+    // guard in `autoSelectedTextIds` is the tested seam, even though `pickText` now returns `[]` for an absent
+    // preference too (0007 §5).
     expect(src.match(/autoSelectedTextIds\(/g)).toHaveLength(1)
     expect(src).not.toMatch(/\bpickText\b/)
   })

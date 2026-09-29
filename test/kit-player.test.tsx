@@ -7,11 +7,14 @@
  * the native event was dispatched, across its manifest await) — kept because the kit's gate must hold without
  * adapter cooperation (decision 0005 §3 amendment). It re-implements no kit logic. Since KIT-015 the state gate
  * is asserted here too (#5–#7; docs/decisions/0008).
+ *
+ * Also the guard of record for KIT-014 / decision 0007 on the real component: an empty `preferredText` selects
+ * nothing and description text is opt-in.
  */
 import { act, forwardRef, useImperativeHandle } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Cue, PlayerState, Tracks } from '../src/core'
-import type { AdapterProps, KitPlayerRef } from '../src/player/types'
+import type { AdapterProps, KitPlayerProps, KitPlayerRef } from '../src/player/types'
 
 const fake = vi.hoisted(() => ({ current: null as unknown }))
 vi.mock('react-native', () => ({ Platform: { OS: 'web' } }))
@@ -95,10 +98,25 @@ const TRACKS_B: Tracks = {
     { id: '1', language: 'de', label: 'Deutsch', kind: 'subtitles', active: false, url: 'B/1' },
   ],
 }
+/** A source with an audio-description text rendition (`CHARACTERISTICS="public.accessibility.describes-video"` → 'descriptions'). */
+const TRACKS_D: Tracks = {
+  audio: [main],
+  text: [
+    { id: '0', language: 'en', label: 'English', kind: 'subtitles', active: false, url: 'D/0' },
+    { id: '1', language: 'de', label: 'Deutsch', kind: 'subtitles', active: false, url: 'D/1' },
+    { id: '2', language: 'en', label: 'Audio description', kind: 'descriptions', active: false, url: 'D/2' },
+  ],
+}
 
 // Load-bearing: module-level, stable identities. An inline `preferredText={{…}}` re-creates `handleTracks` on
 // every render through that dep and masks a missing `sourceUri` dep (plan §7.4 M2).
 const PREF = { languages: ['de'] }
+type Pref = NonNullable<KitPlayerProps['preferredText']>
+const PREF_EMPTY: Pref = {}
+const PREF_LANGS_UNDEFINED: Pref = { languages: undefined }
+const PREF_EN: Pref = { languages: ['en'] }
+const PREF_EN_DESCRIPTIONS: Pref = { languages: ['en'], kinds: ['descriptions'] }
+const PREF_OFF: Pref = { kinds: [] }
 const onTracks = vi.fn<(t: Tracks) => void>()
 const onState = vi.fn<(s: PlayerState) => void>()
 const onCue = vi.fn<(c: Cue[]) => void>()
@@ -115,13 +133,13 @@ const setApi = (r: KitPlayerRef | null) => {
   api = r
 }
 
-function render(uri: string) {
+function render(uri: string, pref: Pref = PREF) {
   act(() =>
     root.render(
       <KitPlayer
         ref={setApi}
         source={{ uri, type: 'hls' }}
-        preferredText={PREF}
+        preferredText={pref}
         onTracks={onTracks}
         onState={onState}
         onCue={onCue}
@@ -136,6 +154,7 @@ const lastCueTexts = () => (onCue.mock.calls.at(-1)?.[0] ?? []).map((c) => c.tex
 function seek(s: number) {
   act(() => api!.seek(s))
 }
+const selectText = (ids: string[]) => act(() => api!.selectText(ids))
 
 beforeEach(() => {
   fake.current = Double
@@ -248,5 +267,86 @@ describe('KitPlayer state gate: ready never overwrites playing (KIT-015 / KIT-02
 
     expect(onState.mock.calls).toEqual([['ready'], ['playing'], ['ready']])
     expect(ctx.state).toBe('ready')
+  })
+})
+
+describe('KitPlayer preferredText: an empty preference selects nothing, descriptions are opt-in (KIT-014, decision 0007)', () => {
+  it('preferredText={{}} selects no text track: the adapter is not told and no cue is emitted, while preferredAudio is still applied and the report still reaches onTracks', () => {
+    render('D', PREF_EMPTY)
+    beginLoad().complete(TRACKS_D)
+    seek(2)
+
+    expect(selectTextCalls).toEqual([])
+    expect(lastCueTexts()).toEqual([])
+    expect(selectAudioCalls).toEqual(['a0'])
+    expect(onTracks).toHaveBeenCalledWith(TRACKS_D)
+    expect(urls(ctx.tracks)).toEqual(['D/0', 'D/1', 'D/2'])
+  })
+
+  it('preferredText={{ languages: undefined }} selects nothing either', () => {
+    render('D', PREF_LANGS_UNDEFINED)
+    beginLoad().complete(TRACKS_D)
+    seek(2)
+
+    expect(selectTextCalls).toEqual([])
+    expect(lastCueTexts()).toEqual([])
+  })
+
+  it('{ kinds: [] } (captions off) selects nothing on the real component', () => {
+    render('D', PREF_OFF)
+    beginLoad().complete(TRACKS_D)
+    seek(2)
+
+    expect(selectTextCalls).toEqual([])
+  })
+
+  it("{ languages: ['en'] } selects the English subtitles and leaves the English descriptions track out", () => {
+    render('D', PREF_EN)
+    beginLoad().complete(TRACKS_D)
+    seek(2)
+
+    expect(selectTextCalls).toEqual([['0']])
+    expect(lastCueTexts()).toEqual(['D/0'])
+  })
+
+  it("{ languages: ['en'], kinds: ['descriptions'] } selects only the English descriptions track", () => {
+    render('D', PREF_EN_DESCRIPTIONS)
+    beginLoad().complete(TRACKS_D)
+    seek(2)
+
+    expect(selectTextCalls).toEqual([['2']])
+    expect(lastCueTexts()).toEqual(['D/2'])
+  })
+
+  it('selectText with a description id is honoured after an empty preference selected nothing', () => {
+    render('D', PREF_EMPTY)
+    beginLoad().complete(TRACKS_D)
+    selectText(['2'])
+    seek(2)
+
+    expect(selectTextCalls).toEqual([['2']])
+    expect(lastCueTexts()).toEqual(['D/2'])
+  })
+
+  it('selectText with several ids, one a description, delivers every track’s cues (multi-track unchanged)', () => {
+    render('D', PREF_EN)
+    beginLoad().complete(TRACKS_D)
+    selectText(['0', '2'])
+    seek(2)
+
+    expect(lastCueTexts().sort()).toEqual(['D/0', 'D/2'])
+  })
+
+  it('a source switch re-applies an empty preference as nothing: the second source’s first onTracks selects no text either', () => {
+    render('A', PREF_EMPTY)
+    beginLoad().complete(TRACKS_A)
+    render('D', PREF_EMPTY)
+    beginLoad().complete(TRACKS_D)
+    seek(2)
+
+    expect(selectTextCalls).toEqual([])
+    expect(selectAudioCalls).toEqual(['a0', 'a0'])
+    expect(urls(ctx.tracks)).toEqual(['D/0', 'D/1', 'D/2'])
+    expect(lastCueTexts()).toEqual([])
   })
 })
