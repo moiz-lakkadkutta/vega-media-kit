@@ -16,6 +16,8 @@ import { cueIds, deferred, events, metadataLoaded, routeStream } from './helpers
  * `ready` that would overwrite `playing`.
  * Specs 27–29 (KIT-014, decision 0007): an empty `preferredText` selects nothing; description text is selected
  * only when `kinds` names it; `selectText` with its id still delivers it.
+ * Specs 30–33 (KIT-016): text-load failures reach `onError` as `TEXT_FETCH` without a fetch storm; a superseded
+ * source's failure does not.
  */
 const BASE = 'http://localhost:4173'
 const trackEvents = (page: Page) => events(page).then((e) => e.filter((x) => x.type === 'tracks'))
@@ -425,4 +427,67 @@ test('preferredText={kinds:["descriptions"]} selects the descriptions rendition 
   await waitForTracks(page)
   await expect.poll(() => cueIds(page, 2)).toEqual(['2:c1'])
   expect(hits.filter((h) => h.startsWith('fetch subs/'))).toEqual([])
+})
+
+const errorEvents = (page: Page) => events(page).then((e) => e.filter((x) => x.type === 'error'))
+const TEXT_FETCH = { type: 'error', code: 'TEXT_FETCH', fatal: false }
+
+test('a subtitle playlist answering 404 reaches onError as one non-fatal TEXT_FETCH and nothing else is fetched for that track (KIT-016)', async ({ page }) => {
+  const hits = await routeStream(page, { respond: { 'subs/en/index.m3u8': { status: 404, body: 'Not Found' } } })
+  await page.goto('/player.html?preferred=' + encodeURIComponent('{"languages":["en"]}'))
+  await expect.poll(() => errorEvents(page)).toEqual([expect.objectContaining(TEXT_FETCH)])
+  await page.waitForTimeout(300) // a storm would be in flight by now
+  expect(await errorEvents(page)).toHaveLength(1)
+  expect(hits.filter((h) => h.startsWith('fetch subs/en/'))).toEqual(['fetch subs/en/index.m3u8'])
+  expect(await hasState(page, 'ready')).toBe(true)
+  expect(await hasState(page, 'error')).toBe(false)
+})
+
+test('a 200 HTML error page for a subtitle playlist reaches onError and triggers no per-line fetches (KIT-016)', async ({ page }) => {
+  const html = '<!doctype html>\n<html>\n<body>CDN error</body>\n</html>\n'
+  const hits = await routeStream(page, { respond: { 'subs/en/index.m3u8': { status: 200, body: html, contentType: 'text/html' } } })
+  await page.goto('/player.html?preferred=' + encodeURIComponent('{"languages":["en"]}'))
+  await expect.poll(() => errorEvents(page)).toEqual([expect.objectContaining(TEXT_FETCH)])
+  await page.waitForTimeout(300)
+  expect(await errorEvents(page)).toHaveLength(1)
+  expect(hits.filter((h) => h.startsWith('fetch subs/en/'))).toEqual(['fetch subs/en/index.m3u8'])
+  expect(await hasState(page, 'ready')).toBe(true)
+  expect(await hasState(page, 'error')).toBe(false)
+})
+
+test('one failing track does not block the other: selectText(["0","1"]) with de failing delivers en cues and reports one TEXT_FETCH (KIT-016)', async ({ page }) => {
+  await routeStream(page, { respond: { 'subs/de/index.m3u8': 'abort' } })
+  await page.goto('/player.html?preferred=' + encodeURIComponent('{}'))
+  await waitForTracks(page)
+  await selectText(page, ['0', '1']) // multi-track selection, exercised: de ('0') fails, en ('1') must still land
+  await expect.poll(() => cueIds(page, 2)).toEqual(['1:c1'])
+  await expect.poll(() => errorEvents(page)).toEqual([expect.objectContaining({ ...TEXT_FETCH, message: 'Could not load text track 0' })])
+})
+
+test("a subtitle fetch that fails after a source switch does not reach onError for the new source; the new source's own failure does (KIT-016 × 0005 §4)", async ({ page }) => {
+  // A's de fetch is held on its last segment, then answered 500 — after B is live and its de cue has landed.
+  const late = deferred()
+  const hits = await routeStream(page, {
+    hold: { 'subs/de/seg-1.vtt': late.promise },
+    respond: { 'subs/de/seg-1.vtt': { status: 500, body: 'Internal Server Error' }, 'subs-b/en/index.m3u8': { status: 404, body: 'Not Found' } },
+  })
+  await page.goto('/player.html?preferred=' + encodeURIComponent('{"languages":["de"]}'))
+  await waitForTracks(page)
+  await expect.poll(() => hits).toContain('fetch subs/de/seg-1.vtt') // A's fetch is in flight
+
+  await setSource(page, '/stream/master-b')
+  await expect.poll(() => cueText(page, 2)).toEqual(['Zweite Quelle'])
+
+  const delivered = page.waitForResponse('**/stream/subs/de/seg-1.vtt').then((r) => r.finished())
+  late.resolve() // A's segment fails now, through the onError A's selectText captured
+  await delivered
+  await page.waitForTimeout(500)
+  expect(await errorEvents(page)).toEqual([])
+  expect(await cueText(page, 2)).toEqual(['Zweite Quelle'])
+
+  // Positive control: B's own failure is reported — without it this spec would pass with onError never wired.
+  await selectText(page, ['0', '1'])
+  await expect.poll(() => errorEvents(page)).toEqual([expect.objectContaining({ ...TEXT_FETCH, message: 'Could not load text track 1' })])
+  await page.waitForTimeout(300)
+  expect(await errorEvents(page)).toHaveLength(1)
 })

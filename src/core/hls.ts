@@ -191,7 +191,33 @@ export function isMasterPlaylist(text: string): boolean {
   return master
 }
 
-const MEDIA_TYPES: HlsMediaType[] = ['AUDIO', 'VIDEO', 'SUBTITLES', 'CLOSED-CAPTIONS']
+/**
+ * What a subtitle URL answered with, judged by its first non-blank line (BOM stripped, CRLF tolerated):
+ * - 'webvtt'          — first line starts with `WEBVTT` followed by end-of-line, space or tab (W3C WebVTT §4.1)
+ * - 'media-playlist'  — first line is `#EXTM3U` and `isMasterPlaylist` is false
+ * - 'master-playlist' — first line is `#EXTM3U` and `isMasterPlaylist` is true
+ * - 'unknown'         — anything else: empty, HTML error page, JSON, plain text
+ */
+export type SubtitleBodyKind = 'webvtt' | 'media-playlist' | 'master-playlist' | 'unknown'
+
+export function subtitleBodyKind(text: string): SubtitleBodyKind {
+  const first = playlistLines(text)[0]
+  if (first === undefined) return 'unknown'
+  if (/^WEBVTT(?:$|[ \t])/.test(first)) return 'webvtt'
+  if (first === '#EXTM3U') return isMasterPlaylist(text) ? 'master-playlist' : 'media-playlist'
+  return 'unknown'
+}
+
+/**
+ * Segment URI lines of a media playlist, in order, exactly as written (trimmed; not resolved): every non-blank
+ * line that does not start with '#'. BOM and CRLF tolerated. [] when there are none.
+ * Resolution stays in src/player/hls.ts (KIT-002 §9 Q5 is a separate ticket).
+ */
+export function mediaPlaylistUris(text: string): string[] {
+  return playlistLines(text).filter((line) => !line.startsWith('#'))
+}
+
+const MEDIA_TYPES: HlsMediaType[] =['AUDIO', 'VIDEO', 'SUBTITLES', 'CLOSED-CAPTIONS']
 
 const yes = (v: string | undefined): boolean => v === 'YES'
 

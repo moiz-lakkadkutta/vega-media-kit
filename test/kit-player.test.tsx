@@ -13,7 +13,7 @@
  */
 import { act, forwardRef, useImperativeHandle } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import type { Cue, PlayerState, Tracks } from '../src/core'
+import type { Cue, PlayerError, PlayerState, Tracks } from '../src/core'
 import type { AdapterProps, KitPlayerProps, KitPlayerRef } from '../src/player/types'
 
 const fake = vi.hoisted(() => ({ current: null as unknown }))
@@ -34,6 +34,8 @@ let latest: { props: AdapterProps | null } = { props: null }
 let textUrls = new Map<string, string>()
 const selectTextCalls: string[][] = []
 const selectAudioCalls: string[] = []
+/** KIT-016: when set, the double's `selectText` returns what this returns; it gets *this render's* props. */
+let selectTextImpl: ((ids: string[], props: AdapterProps) => unknown) | null = null
 
 /** A one-cue VTT whose text is the playlist url, so the cue on screen says which source's bytes landed. */
 const vttFor = (url: string) => `WEBVTT\n\n00:00:00.000 --> 00:00:10.000\n${url}\n`
@@ -52,6 +54,7 @@ const Double = forwardRef<KitPlayerRef, AdapterProps>(function Double(props, ref
     },
     selectText: (ids: string[]) => {
       selectTextCalls.push([...ids])
+      if (selectTextImpl) return selectTextImpl(ids, props) // KIT-016: a controlled promise / an onError report
       for (const id of ids) {
         const url = textUrls.get(id)
         if (url) props.onTextTrackData?.(id, vttFor(url))
@@ -120,6 +123,7 @@ const PREF_OFF: Pref = { kinds: [] }
 const onTracks = vi.fn<(t: Tracks) => void>()
 const onState = vi.fn<(s: PlayerState) => void>()
 const onCue = vi.fn<(c: Cue[]) => void>()
+const onError = vi.fn<(e: PlayerError) => void>()
 const ctx: { tracks: Tracks | null; state: PlayerState | null } = { tracks: null, state: null }
 const renderControls = (c: { tracks: Tracks; state: PlayerState }) => {
   ctx.tracks = c.tracks
@@ -133,7 +137,7 @@ const setApi = (r: KitPlayerRef | null) => {
   api = r
 }
 
-function render(uri: string, pref: Pref = PREF) {
+function render(uri: string, pref: Pref = PREF, errorHandler: KitPlayerProps['onError'] = onError) {
   act(() =>
     root.render(
       <KitPlayer
@@ -143,6 +147,7 @@ function render(uri: string, pref: Pref = PREF) {
         onTracks={onTracks}
         onState={onState}
         onCue={onCue}
+        onError={errorHandler}
         renderControls={renderControls}
       />,
     ),
@@ -162,6 +167,8 @@ beforeEach(() => {
   textUrls = new Map()
   selectTextCalls.length = 0
   selectAudioCalls.length = 0
+  selectTextImpl = null
+  onError.mockClear()
   onTracks.mockClear()
   onState.mockClear()
   onCue.mockClear()
@@ -348,5 +355,96 @@ describe('KitPlayer preferredText: an empty preference selects nothing, descript
     expect(selectAudioCalls).toEqual(['a0', 'a0'])
     expect(urls(ctx.tracks)).toEqual(['D/0', 'D/1', 'D/2'])
     expect(lastCueTexts()).toEqual([])
+  })
+})
+
+describe('KitPlayer onError origin gate and selectText safety net (KIT-016)', () => {
+  const ERR: PlayerError = { code: 'TEXT_FETCH', message: 'Could not load text track 0', fatal: false }
+  /** A promise the test settles by hand. */
+  function controlled() {
+    let reject!: (e: unknown) => void
+    const promise = new Promise<void>((_, rej) => {
+      reject = rej
+    })
+    return { promise, reject }
+  }
+
+  it('forwards an adapter error for the live source to onError', () => {
+    render('A', PREF_EMPTY)
+    act(() => latest.props!.onError?.(ERR))
+
+    expect(onError.mock.calls).toEqual([[ERR]])
+  })
+
+  it('drops an error reported through a handler created for a source that is no longer live', () => {
+    render('A', PREF_EMPTY)
+    const reportA = latest.props!.onError
+    render('B', PREF_EMPTY)
+    act(() => reportA?.(ERR))
+
+    expect(onError).not.toHaveBeenCalled()
+
+    // B's own handler is accepted: catches a gate that drops everything.
+    const errB: PlayerError = { ...ERR, message: 'Could not load text track 1' }
+    act(() => latest.props!.onError?.(errB))
+    expect(onError.mock.calls).toEqual([[errB]])
+  })
+
+  it('routes a rejected adapter selectText promise to onError as one non-fatal TEXT_FETCH', async () => {
+    const boom = new Error('boom')
+    const d = controlled()
+    selectTextImpl = () => d.promise
+    render('A', PREF_EMPTY)
+    beginLoad().complete(TRACKS_A)
+    selectText(['0'])
+    await act(async () => {
+      d.reject(boom)
+      await Promise.resolve()
+    })
+
+    expect(onError.mock.calls).toEqual([[{ code: 'TEXT_FETCH', message: 'Could not load text tracks', fatal: false, cause: boom }]])
+  })
+
+  it('drops a selectText rejection that settles after the source changed', async () => {
+    const d = controlled()
+    selectTextImpl = () => d.promise
+    render('A', PREF_EMPTY)
+    beginLoad().complete(TRACKS_A)
+    selectText(['0'])
+    selectTextImpl = null
+    render('B', PREF_EMPTY)
+    await act(async () => {
+      d.reject(new Error('late'))
+      await Promise.resolve()
+    })
+
+    expect(onError).not.toHaveBeenCalled()
+  })
+
+  it('delivers to the latest onError prop: an inline onError passed on a later render receives the error', () => {
+    const first = vi.fn<(e: PlayerError) => void>()
+    const second = vi.fn<(e: PlayerError) => void>()
+    render('A', PREF_EMPTY, (e) => first(e))
+    const report = latest.props!.onError // as an in-flight selectText of this render would hold it
+    render('A', PREF_EMPTY, (e) => second(e)) // same source, a new inline identity
+    act(() => report?.(ERR))
+
+    expect(first).not.toHaveBeenCalled()
+    expect(second.mock.calls).toEqual([[ERR]])
+  })
+
+  it('does not report an error twice when the adapter both reports TEXT_FETCH and resolves', async () => {
+    selectTextImpl = (ids, props) => {
+      props.onError?.({ ...ERR, message: `Could not load text track ${ids[0]}` })
+      return Promise.resolve()
+    }
+    render('A', PREF_EMPTY)
+    beginLoad().complete(TRACKS_A)
+    selectText(['0'])
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(onError.mock.calls).toEqual([[ERR]])
   })
 })
