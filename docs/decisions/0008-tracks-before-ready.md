@@ -38,6 +38,13 @@ lands would show a spinner over video that is audibly playing.
    synthesises `onState`; it now also refuses one. The kit does not re-order or defer reports — ordering is
    the adapter's obligation, stated in `AdapterProps`.
 
+*Amended (KIT-025, 2026-10-04; orchestrator, offered to the human for veto):* §2 also drops a `ready` that
+arrives after the live load reported `error` (`readyClosed`, reset on source change). Web now reports
+`playing` on the element's `playing` event (not `play`) and `buffering` on `waiting` while not paused, so a
+web autoplay load reports `loading → ready → playing` when tracks are known before frames play — still
+compatible with "may never report `ready`". A failed web load reports `MEDIA` (fatal) then `error`, and no
+`onTracks`/`ready`. A blocked autoplay reports a non-fatal `PLAY_REJECTED` and stays at `ready`.
+
 ## Consequences
 
 - No type changes. `KitPlayerProps.onState` and `AdapterProps` JSDoc state the contract.

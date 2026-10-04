@@ -92,6 +92,9 @@ that is no longer live. Refusing is not synthesising; the kit still emits no sta
 and drops an error from a source that is no longer live, for every code and platform (incl. Vega `SHAKA_*`).
 A rejected adapter `selectText` promise is reported as `TEXT_FETCH` through the handler captured at call time.
 Known limit, shared with `onTracks`/state: A → B → A revives A's first-load handler (same uri).
+*KIT-025:* the web `error` listener and the autoplay `play()` rejection report through the `onError` captured
+by their load, never a latest-props ref (that would report A's failure as B's). The app's own callbacks are
+read through latest-props refs *behind* the per-source gates, so an inline callback is never stale.
 
 **4. The race is real and the gate is extended: VTT is accepted only if it was requested for the source
 that is live now.** `acceptsTextTrackData` gating on `selectedText` alone is *not* sufficient. Both web and
