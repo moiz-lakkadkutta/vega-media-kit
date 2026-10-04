@@ -6,6 +6,11 @@ import type { KitPlayerProps, KitPlayerRef } from './types'
 import { resolveAdapter } from './adapters'
 import { acceptsTextTrackData, applyTextSelection, autoSelectedTextIds, sourceChanged } from './selection'
 
+/** `setVolume`'s input rule: clamp to [0, 1] (±Infinity included); `NaN` → `null`, meaning "ignore the call". */
+function clampVolume(v: number): number | null {
+  return Number.isNaN(v) ? null : Math.min(1, Math.max(0, v))
+}
+
 /**
  * KitPlayer: one component, one ref, one cue model — on Fire OS (ExoPlayer), Vega (w3cmedia + Shaka) and web.
  * Cues reach `onCue` either from the adapter's own events or from the kit's scheduler over parsed WebVTT;
@@ -210,6 +215,10 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
         scheduler.update(s)
       },
       setRate: (r) => adapterRef.current?.setRate(r),
+      setVolume: (v) => {
+        const c = clampVolume(v)
+        if (c !== null) adapterRef.current?.setVolume(c)
+      },
       selectAudio: (id) => adapterRef.current?.selectAudio(id),
       selectText,
       getPosition: () => adapterRef.current?.getPosition() ?? positionRef.current,

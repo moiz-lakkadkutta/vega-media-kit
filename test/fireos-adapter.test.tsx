@@ -349,3 +349,59 @@ describe('FireOsAdapter — tracks before ready; ready never overwrites playing 
     expect(ctx.state).toBe('ready')
   })
 })
+
+describe('FireOsAdapter — setVolume (DESC-006)', () => {
+  const setVolume = (v: number) => act(() => api!.setVolume(v))
+
+  it("passes react-native-video's `volume` prop, full volume by default", () => {
+    render(A)
+    expect(rig.props!.volume).toBe(1)
+    setVolume(0.4)
+    expect(rig.props!.volume).toBe(0.4)
+  })
+
+  it('clamps to [0, 1] and ignores NaN', () => {
+    render(A)
+    setVolume(2)
+    expect(rig.props!.volume).toBe(1)
+    setVolume(-0.5)
+    expect(rig.props!.volume).toBe(0)
+    setVolume(0.6)
+    setVolume(Number.NaN)
+    expect(rig.props!.volume).toBe(0.6)
+  })
+
+  it('is a prop update on the same player: no re-mount, no new load, no state report', async () => {
+    render(A)
+    await loadStart()
+    await load()
+    await release(0, MASTER_A)
+    const statesBefore = states()
+    const fetchesBefore = fetched().length
+
+    for (const v of [0.8, 0.6, 0.4, 0.2, 0, 0.2, 0.4, 0.6, 0.8, 1]) setVolume(v) // a crossfade's steps
+
+    expect(rig.mounts).toBe(1)
+    expect(rig.unmounts).toBe(0)
+    expect(rig.props!.source.uri).toBe(A)
+    expect(fetched()).toHaveLength(fetchesBefore)
+    expect(states()).toEqual(statesBefore)
+    expect(rig.props!.volume).toBe(1)
+  })
+
+  it('is kept across a source change: the new <Video> mounts at the same volume', async () => {
+    render(A)
+    setVolume(0.3)
+    render(B)
+    expect(rig.mounts).toBe(2) // a fresh react-native-video instance for B
+    expect(rig.props!.source.uri).toBe(B)
+    expect(rig.props!.volume).toBe(0.3)
+  })
+
+  it('works when called unbound (`const set = ref.setVolume; set(v)`)', () => {
+    render(A)
+    const set = api!.setVolume
+    act(() => set(0.3))
+    expect(rig.props!.volume).toBe(0.3)
+  })
+})

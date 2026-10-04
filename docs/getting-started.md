@@ -66,5 +66,22 @@ web a custom request header forces a CORS preflight that a CDN without
 `Access-Control-Allow-Headers: x-kit-text-urls` rejects. The kit's own master-playlist request always strips
 the header.
 
+## Volume
+
+`ref.current?.setVolume(v)` sets the output volume from `0` (silent) to `1` (full, the default). Values are
+clamped to [0, 1] and `NaN` is ignored. It is a property update on the playing source — no reload, no
+re-buffer — so it can be stepped to fade the audio around a rendition switch:
+
+```tsx
+for (const v of [0.8, 0.6, 0.4, 0.2, 0]) { ref.current?.setVolume(v); await wait(30) }
+ref.current?.selectAudio(describedId)
+for (const v of [0.2, 0.4, 0.6, 0.8, 1]) { await wait(30); ref.current?.setVolume(v) }
+```
+
+The volume is kept across source changes. Fire OS passes it to react-native-video's
+[`volume`](https://docs.thewidlarzgroup.com/react-native-video/docs/v6/component/props/#volume) prop; web sets
+[`HTMLMediaElement.volume`](https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/volume). On Vega
+(experimental) it is a no-op that logs once at debug level — the fade above degrades to a plain switch.
+
 ## Scale
 Sizes in the kit are "px at 1920×1080". Fire OS renders at 960×540 dp → pass `scale={0.5}`; Vega apps are expected to pass `1` (unverified). Multiply by the user's caption-size setting through `theme.userScale`.

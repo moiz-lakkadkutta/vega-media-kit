@@ -12,6 +12,13 @@ export interface KitPlayerRef {
   pause(): void
   seek(seconds: number): void
   setRate(rate: 0.5 | 0.75 | 1 | 1.25): void
+  /**
+   * Output volume, 0 (silent) to 1 (full; the default). Clamped to [0, 1]; `NaN` is ignored. A property update on
+   * the playing source — no reload, no re-buffer — so it can be stepped for a fade (e.g. around `selectAudio`).
+   * Kept across source changes. Fire OS: react-native-video's `volume` prop. Web: `HTMLMediaElement.volume`.
+   * Vega: a no-op that logs once (Vega is experimental, decision 0001). Adapters receive an already-clamped value.
+   */
+  setVolume(volume: number): void
   selectAudio(trackId: string): void
   /** Multiple text tracks on purpose (two languages; captions + descriptions). */
   selectText(trackIds: string[]): void

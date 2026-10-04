@@ -68,6 +68,9 @@ export const WebAdapter = forwardRef<KitPlayerRef, AdapterProps>(function WebAda
     pause: () => el.current?.pause(),
     seek: (s) => { if (el.current) el.current.currentTime = s },
     setRate: (r) => { if (el.current) el.current.playbackRate = r },
+    // KitPlayer has clamped it: HTMLMediaElement.volume throws IndexSizeError outside [0, 1]
+    // (https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/volume).
+    setVolume: (v) => { if (el.current) el.current.volume = v },
     selectAudio: () => {},
     selectText: async (ids) => {
       // `props` is this render's: the `onTextTrackData` and `onError` handed over for the source live when

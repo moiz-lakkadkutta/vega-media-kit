@@ -34,6 +34,7 @@ let latest: { props: AdapterProps | null } = { props: null }
 let textUrls = new Map<string, string>()
 const selectTextCalls: string[][] = []
 const selectAudioCalls: string[] = []
+const setVolumeCalls: number[] = []
 /** KIT-016: when set, the double's `selectText` returns what this returns; it gets *this render's* props. */
 let selectTextImpl: ((ids: string[], props: AdapterProps) => unknown) | null = null
 
@@ -49,6 +50,9 @@ const Double = forwardRef<KitPlayerRef, AdapterProps>(function Double(props, ref
     pause: () => {},
     seek: () => {},
     setRate: () => {},
+    setVolume: (v: number) => {
+      setVolumeCalls.push(v)
+    },
     selectAudio: (id: string) => {
       selectAudioCalls.push(id)
     },
@@ -167,6 +171,7 @@ beforeEach(() => {
   textUrls = new Map()
   selectTextCalls.length = 0
   selectAudioCalls.length = 0
+  setVolumeCalls.length = 0
   selectTextImpl = null
   onError.mockClear()
   onTracks.mockClear()
@@ -355,6 +360,38 @@ describe('KitPlayer preferredText: an empty preference selects nothing, descript
     expect(selectAudioCalls).toEqual(['a0', 'a0'])
     expect(urls(ctx.tracks)).toEqual(['D/0', 'D/1', 'D/2'])
     expect(lastCueTexts()).toEqual([])
+  })
+})
+
+describe('KitPlayer setVolume: clamped to [0, 1], NaN ignored, before any adapter sees it (DESC-006)', () => {
+  it('forwards an in-range volume unchanged', () => {
+    render('A')
+    act(() => api!.setVolume(0.35))
+    expect(setVolumeCalls).toEqual([0.35])
+  })
+
+  it('clamps out-of-range values and infinities', () => {
+    render('A')
+    act(() => {
+      api!.setVolume(1.2)
+      api!.setVolume(-0.1)
+      api!.setVolume(Infinity)
+      api!.setVolume(-Infinity)
+    })
+    expect(setVolumeCalls).toEqual([1, 0, 1, 0])
+  })
+
+  it('does not call the adapter for NaN', () => {
+    render('A')
+    act(() => api!.setVolume(Number.NaN))
+    expect(setVolumeCalls).toEqual([])
+  })
+
+  it('is on the stable ref renderControls is handed, and works unbound', () => {
+    render('A')
+    const set = api!.setVolume
+    act(() => set(0.5))
+    expect(setVolumeCalls).toEqual([0.5])
   })
 })
 
