@@ -90,14 +90,14 @@ export function CueOverlay({ active, primaryTrackId, theme, scale = 0.5, selecta
       const words = text.replace(/<[^>]+>/g, '').split(/(\s+)/)
       let wi = -1
       return (
-        <Text key={`${c.trackId}:${c.id}`} style={style} accessibilityRole="text">
+        <Text key={`${c.trackId}:${c.id}`} style={style} numberOfLines={2}>
           {label}
           {words.map((w, k) => {
             if (/^\s+$/.test(w)) return <Text key={k}>{w}</Text>
             wi++
             const focused = selectable.focusedIndex === wi
             return (
-              <Text key={k} style={focused ? styles.focusedWord : undefined} accessibilityLabel={w}>
+              <Text key={k} style={focused ? styles.focusedWord : undefined} aria-label={w}>
                 {w}
               </Text>
             )
@@ -106,7 +106,7 @@ export function CueOverlay({ active, primaryTrackId, theme, scale = 0.5, selecta
       )
     }
     return (
-      <Text key={`${c.trackId}:${c.id}-${i}`} style={style} numberOfLines={2} accessibilityRole="text">
+      <Text key={`${c.trackId}:${c.id}-${i}`} style={style} numberOfLines={2}>
         {label}
         {renderInline(text, style, `${c.trackId}:${c.id}`)}
       </Text>
@@ -121,7 +121,7 @@ export function CueOverlay({ active, primaryTrackId, theme, scale = 0.5, selecta
     ) : null
 
   return (
-    <View pointerEvents="none" style={[styles.root, { paddingHorizontal: inset.x, paddingVertical: inset.y }]} testID={testID}>
+    <View style={[styles.root, { paddingHorizontal: inset.x, paddingVertical: inset.y }]} testID={testID}>
       <View style={styles.topArea}>{top.length ? box(top.map((c, i) => renderCue(c, primaryStyle, i)), 'top') : null}</View>
       <View style={styles.bottomArea}>
         {!hideSecondary && secondary.length ? box(secondary.map((c, i) => renderCue(c, secondaryStyle, i)), 'sec') : null}
@@ -132,7 +132,7 @@ export function CueOverlay({ active, primaryTrackId, theme, scale = 0.5, selecta
 }
 
 const styles = StyleSheet.create({
-  root: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, justifyContent: 'space-between' },
+  root: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, justifyContent: 'space-between', pointerEvents: 'none' },
   topArea: { alignItems: 'center' },
   bottomArea: { alignItems: 'center', gap: 8 },
   box: { maxWidth: '86%', alignItems: 'center' },

@@ -5,6 +5,7 @@ Defaults (px at 1920×1080): inset 96/54 (5 % safe zone), primary 44 / secondary
 - `primaryTrackId`: which track renders large; other active tracks render as secondary lines above (Lingo's native line).
 - `hideSecondary`: Lingo "Challenge" mode.
 - `selectable={{ focusedIndex, onFocusWord }}`: word-level focus for D-pad navigation while paused.
+- Every cue, `selectable` included, is clamped to 2 lines; in `selectable` mode words past line 2 are not visible but still count for `focusedIndex` and keep their label — fix the cue (see `lintCues`).
 - `line: 'top'` cues render at the top (Netflix convention when burnt-in text would be covered).
 - Speakers render as `[Name] `; sound cues as `[sound]`; `<i>`/`<b>` preserved.
 - Pass `theme.fontFamily` (Described: Atkinson Hyperlegible; Lingo: Noto Sans) and `theme.userScale` (1–2).

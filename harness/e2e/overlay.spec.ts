@@ -136,3 +136,32 @@ test('a line:top cue renders in the top area', async ({ page }) => {
   await expect(bottom).toHaveCount(1)
   await expect(bottom.nth(0)).toHaveText('Hallo Welt')
 })
+
+// KIT-017 §5.2: the selectable path keeps the two-line limit; the ARIA-style migration preserves semantics.
+test('a selectable cue is clamped to two lines like any other, and every word keeps its label', async ({ page }) => {
+  await setCues(page, [CUE3L], { selectable: { focusedIndex: 11 } })
+  expect((await rect(text(page).first())).height).toBeCloseTo(114, 0) // 2 × 57; unclamped it is 171
+  expect(await computed(page, 'div[dir="auto"]', '-webkit-line-clamp')).toBe('2')
+  const words = overlay(page).locator('span[aria-label]')
+  await expect(words).toHaveCount(12)
+  await expect(words.nth(11)).toHaveAttribute('aria-label', 'clipped')
+  await setCues(page, [WORDS], { selectable: { focusedIndex: 0 } })
+  expect((await rect(text(page).first())).height).toBeCloseTo(57, 0)
+})
+
+test('cue text exposes no ARIA role and the overlay never takes pointer events', async ({ page }) => {
+  await setCues(page, [TOP, DE, EN], { primaryTrackId: 'de' })
+  await expect(overlay(page).locator('[role]')).toHaveCount(0)
+  await setCues(page, [WORDS], { selectable: { focusedIndex: 0 } })
+  await expect(overlay(page).locator('[role]')).toHaveCount(0)
+  expect(await computed(page, '[data-testid="overlay"]', 'pointer-events')).toBe('none')
+  // The hit test, not the root's computed style, is what catches 'box-none' (children would become targets).
+  const first = overlay(page).locator('span[aria-label]').first()
+  const hitInsideOverlay = await first.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+    return !!hit?.closest('[data-testid="overlay"]')
+  })
+  expect(hitInsideOverlay).toBe(false)
+  await expect(overlay(page)).toMatchAriaSnapshot('- text: Hello brave new world')
+})
