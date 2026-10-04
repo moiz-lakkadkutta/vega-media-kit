@@ -150,6 +150,7 @@ describe('deprecatedTextUrls', () => {
  * in `adapters/fireos.tsx` and must stay green against the identical body in `src/player/hls.ts`.
  * They pin today's behaviour, including the parts the plan calls wrong (§9 Q5: segment URLs are `base + line`,
  * so `/abs` and `../` segments resolve incorrectly). Do not "fix" them here.
+ * KIT-016 added the `ok` check; the URL-resolution pins (§9 Q5) are unchanged.
  */
 describe('fetchHlsVtt (moved, behaviour pinned)', () => {
   const VTT_URL = 'https://cdn.example/x/s1/en/prog_index.m3u8'
@@ -161,7 +162,7 @@ describe('fetchHlsVtt (moved, behaviour pinned)', () => {
     const seen: string[] = []
     vi.stubGlobal('fetch', async (url: string) => {
       seen.push(url)
-      return { text: async () => body }
+      return { ok: true, status: 200, url, text: async () => body }
     })
     expect(await fetchHlsVtt(VTT_URL)).toBe(body)
     expect(seen).toEqual([VTT_URL]) // no segment requests
@@ -179,7 +180,7 @@ describe('fetchHlsVtt (moved, behaviour pinned)', () => {
     const seen: string[] = []
     vi.stubGlobal('fetch', async (url: string) => {
       seen.push(url)
-      return { text: async () => bodies[url] ?? '' }
+      return { ok: true, status: 200, url, text: async () => bodies[url] ?? '' }
     })
 
     const out = await fetchHlsVtt(VTT_URL)
@@ -208,7 +209,7 @@ describe('fetchHlsVtt (moved, behaviour pinned)', () => {
     const seen: string[] = []
     vi.stubGlobal('fetch', async (url: string) => {
       seen.push(url)
-      return { text: async () => bodies[url] ?? '' }
+      return { ok: true, status: 200, url, text: async () => bodies[url] ?? '' }
     })
 
     const out = await fetchHlsVtt(VTT_URL)
@@ -231,10 +232,96 @@ describe('fetchHlsVtt (moved, behaviour pinned)', () => {
     const seen: string[] = []
     vi.stubGlobal('fetch', async (url: string) => {
       seen.push(url)
-      return { text: async () => bodies[url] ?? '' }
+      return { ok: true, status: 200, url, text: async () => bodies[url] ?? '' }
     })
     await fetchHlsVtt(VTT_URL)
     expect(seen).toEqual([VTT_URL, 'https://other.example/0.vtt'])
+  })
+})
+
+describe('fetchHlsVtt failures (KIT-016)', () => {
+  const VTT_URL = 'https://cdn.example/x/s1/en/prog_index.m3u8'
+  const DIR = 'https://cdn.example/x/s1/en/'
+  const SEG = 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n'
+  const PLAYLIST = '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\n0.vtt\n#EXTINF:4,\n1.vtt\n#EXT-X-ENDLIST\n'
+
+  type R = { status?: number; body: string }
+  /** Responses keyed by URL (a string is a 200 body); an unknown URL answers 404. Records every URL requested. */
+  function respond(map: Record<string, R | string>): HlsFetch & { seen: string[] } {
+    const seen: string[] = []
+    const fn: HlsFetch = async (url) => {
+      seen.push(url)
+      const r = map[url]
+      const { status, body } = r === undefined ? { status: 404, body: 'Not Found' } : typeof r === 'string' ? { status: 200, body: r } : { status: r.status ?? 200, body: r.body }
+      return { ok: status >= 200 && status < 300, status, url, text: async () => body }
+    }
+    return Object.assign(fn, { seen })
+  }
+
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('rejects with the status and url on a non-2xx playlist and requests nothing else', async () => {
+    const fetch = respond({ [VTT_URL]: { status: 404, body: 'Not Found' } })
+    const err = await fetchHlsVtt(VTT_URL, { fetch }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toContain('404')
+    expect((err as Error).message).toContain(VTT_URL)
+    expect(fetch.seen).toEqual([VTT_URL])
+  })
+
+  it('rejects a 200 HTML error page as not WebVTT and requests no segments (no per-line fetch storm)', async () => {
+    const fetch = respond({ [VTT_URL]: '<!doctype html>\n<html>\n<body>CDN error</body>\n<pre>\nWEBVTT\n</pre>\n</html>\n' })
+    await expect(fetchHlsVtt(VTT_URL, { fetch })).rejects.toThrow(/not WebVTT.*prog_index\.m3u8|prog_index\.m3u8.*not WebVTT/)
+    expect(fetch.seen).toEqual([VTT_URL])
+  })
+
+  it('rejects a master playlist instead of fetching its variants', async () => {
+    const fetch = respond({ [VTT_URL]: fx('apple-bipbop-adv-master.m3u8') })
+    await expect(fetchHlsVtt(VTT_URL, { fetch })).rejects.toThrow(/not WebVTT/)
+    expect(fetch.seen).toEqual([VTT_URL])
+  })
+
+  it('rejects a media playlist with no segments', async () => {
+    const fetch = respond({ [VTT_URL]: '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-ENDLIST\n' })
+    const err = await fetchHlsVtt(VTT_URL, { fetch }).catch((e: unknown) => e)
+    expect((err as Error).message).toContain('no segments')
+    expect((err as Error).message).toContain(VTT_URL)
+    expect(fetch.seen).toEqual([VTT_URL])
+  })
+
+  it('rejects when a segment answers non-2xx, naming the segment url', async () => {
+    const fetch = respond({ [VTT_URL]: PLAYLIST, [`${DIR}0.vtt`]: SEG, [`${DIR}1.vtt`]: { status: 503, body: 'busy' } })
+    const err = await fetchHlsVtt(VTT_URL, { fetch }).catch((e: unknown) => e)
+    expect((err as Error).message).toContain('503')
+    expect((err as Error).message).toContain(`${DIR}1.vtt`)
+  })
+
+  it('rejects when a segment body is not WebVTT', async () => {
+    const fetch = respond({ [VTT_URL]: PLAYLIST, [`${DIR}0.vtt`]: SEG, [`${DIR}1.vtt`]: '<html>oops</html>' })
+    const err = await fetchHlsVtt(VTT_URL, { fetch }).catch((e: unknown) => e)
+    expect((err as Error).message).toContain('not WebVTT')
+    expect((err as Error).message).toContain(`${DIR}1.vtt`)
+  })
+
+  it('propagates a network rejection of the playlist request', async () => {
+    const boom = new TypeError('Failed to fetch')
+    vi.stubGlobal('fetch', async () => { throw boom })
+    await expect(fetchHlsVtt(VTT_URL)).rejects.toBe(boom)
+  })
+
+  it('uses the injected fetch when given, and globalThis.fetch otherwise', async () => {
+    const global: string[] = []
+    vi.stubGlobal('fetch', async (url: string) => {
+      global.push(url)
+      return { ok: true, status: 200, url, text: async () => SEG }
+    })
+    const fetch = respond({ [VTT_URL]: SEG })
+    expect(await fetchHlsVtt(VTT_URL, { fetch })).toBe(SEG)
+    expect(fetch.seen).toEqual([VTT_URL])
+    expect(global).toEqual([])
+
+    expect(await fetchHlsVtt(VTT_URL)).toBe(SEG)
+    expect(global).toEqual([VTT_URL])
   })
 })
 

@@ -25,10 +25,19 @@ export function deferred() {
  * Serve /stream/** from fixtures. The master URL is two things: the playlist body when the adapter `fetch`es
  * it, and the WebM when the `<video>` element loads it (`resourceType() === 'media'`). Either half can be
  * held behind a gate so a spec controls the order in which the adapter sees them.
+ *
+ * `respond` (KIT-016) replaces the fixture for a relative path with a status/body of the spec's choosing, or
+ * `'abort'` (a network failure). It is applied after the `hold` gate, so a spec can hold a request and then fail it.
  */
+export type RouteOverride = { status: number; body?: string; contentType?: string } | 'abort'
 export async function routeStream(
   page: Page,
-  gates: { manifest?: Promise<void>; media?: Promise<void>; hold?: Record<string, Promise<void>> } = {},
+  gates: {
+    manifest?: Promise<void>
+    media?: Promise<void>
+    hold?: Record<string, Promise<void>>
+    respond?: Record<string, RouteOverride>
+  } = {},
 ) {
   const hits: string[] = []
   await page.route('**/stream/**', async (route) => {
@@ -61,6 +70,9 @@ export async function routeStream(
     }
     if (/^master(-[bcd])?(\.m3u8)?$/.test(rel)) await gates.manifest
     await gates.hold?.[rel] // one text path held back, so a spec can make a fetch resolve late on purpose
+    const override = gates.respond?.[rel]
+    if (override === 'abort') return route.abort('failed')
+    if (override) return route.fulfill({ status: override.status, body: override.body ?? '', contentType: override.contentType ?? 'text/plain' })
     return route.fulfill({ path: FIX(`stream/${/^master(-[bcd])?$/.test(rel) ? `${rel}.m3u8` : rel}`), contentType: rel.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'text/vtt' })
   })
   return hits

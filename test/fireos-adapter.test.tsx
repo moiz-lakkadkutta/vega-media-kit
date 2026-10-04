@@ -389,6 +389,15 @@ describe('FireOsAdapter — setVolume (DESC-006)', () => {
     expect(rig.props!.volume).toBe(1)
   })
 
+  it('is kept across a source change: the new <Video> mounts at the same volume', async () => {
+    render(A)
+    setVolume(0.3)
+    render(B)
+    expect(rig.mounts).toBe(2) // a fresh react-native-video instance for B
+    expect(rig.props!.source.uri).toBe(B)
+    expect(rig.props!.volume).toBe(0.3)
+  })
+
   it('works when called unbound (`const set = ref.setVolume; set(v)`)', () => {
     render(A)
     const set = api!.setVolume

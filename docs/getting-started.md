@@ -49,6 +49,10 @@ that is already a media playlist simply reports no text tracks. If the master pl
 (CORS, auth, offline), the kit reports a **non-fatal** `HLS_MASTER` error through `onError` and falls back to
 whatever the player itself exposes — playback is unaffected.
 
+If a selected text track cannot be loaded (HTTP error, a body that is neither WebVTT nor an HLS playlist, network
+failure), the kit reports a non-fatal `TEXT_FETCH` through `onError` for that track; other selected tracks still
+load.
+
 ### Deprecated: `source.headers['x-kit-text-urls']`
 
 Before the kit parsed master playlists, apps passed a JSON id→url map in `source.headers['x-kit-text-urls']`.

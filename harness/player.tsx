@@ -4,12 +4,16 @@ import { flushSync } from 'react-dom'
 import { KitPlayer } from '../src/player'
 import type { KitPlayerRef } from '../src/player'
 import { CueOverlay } from '../src/cues'
-import type { Cue, PlayerState, Tracks } from '../src/core'
+import type { Cue, PlayerError, PlayerState, Tracks } from '../src/core'
 
 /** KitPlayer + the real WebAdapter + CueOverlay on top; specs drive it through `window.__kit` (plan §4.4). */
 ;(globalThis as { KIT_FORCE_ADAPTER?: string }).KIT_FORCE_ADAPTER = 'web'
 
-type Ev = { type: 'state'; state: PlayerState } | { type: 'tracks'; tracks: Tracks } | { type: 'cue'; ids: string[] }
+type Ev =
+  | { type: 'state'; state: PlayerState }
+  | { type: 'tracks'; tracks: Tracks }
+  | { type: 'cue'; ids: string[] }
+  | { type: 'error'; code: string; message: string; fatal: boolean }
 declare global {
   interface Window {
     __kit: {
@@ -153,6 +157,8 @@ const onCue = (active: Cue[]) => {
 }
 const onTracks = (t: Tracks) => log({ type: 'tracks', tracks: t })
 const onState = (s: PlayerState) => log({ type: 'state', state: s })
+/** KIT-016: `cause` is left out — an Error does not survive `page.evaluate` serialisation. */
+const onError = (e: PlayerError) => log({ type: 'error', code: e.code, message: e.message, fatal: e.fatal })
 const onPosition = (_s: number) => {
   kit.positionTicks++
 }
@@ -185,6 +191,7 @@ function App() {
         onPosition={inlineCallbacks ? (s) => onPosition(s) : onPosition}
         onTracks={onTracks}
         onState={onState}
+        onError={onError}
         renderControls={(ctx) => {
           refs.add(ctx.ref)
           renders++

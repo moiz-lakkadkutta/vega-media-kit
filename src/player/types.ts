@@ -52,6 +52,13 @@ export interface KitPlayerProps {
   onTracks?(tracks: Tracks): void
   /** Every change of the active-cue set, across all selected text tracks. */
   onCue?(active: Cue[]): void
+  /**
+   * Errors, by `code`: `HLS_MASTER` (the master playlist could not be read; non-fatal, playback continues without
+   * manifest text tracks), `TEXT_FETCH` (a selected text track could not be loaded — HTTP error, a body that is
+   * neither WebVTT nor an HLS media playlist, network failure; non-fatal, one per failed track per `selectText`,
+   * other selected tracks still load), `EXO` (Fire OS playback error, fatal), `SHAKA_<n>` (Vega, fatal). Errors of a
+   * source the app has switched away from are not reported. Always delivered to the latest `onError` prop.
+   */
   onError?(error: PlayerError): void
   /** Apps own their UI; the kit owns playback. */
   renderControls?(ctx: { state: PlayerState; position: number; tracks: Tracks; ref: KitPlayerRef }): ReactNode
@@ -64,7 +71,9 @@ export interface KitPlayerProps {
  *
  * Origin contract for per-source reports: call the `onTracks` you held when the load began — the load effect's
  * props on web, the `onLoad` closure across its await on Fire OS — and the `onTextTrackData` you were handed at
- * `selectText` time. Never read either through a latest-props ref. The kit re-creates both per `source.uri`
+ * `selectText` time. Hold `onError` the same way: the one of the load an error belongs to (a media or manifest
+ * error), or the one handed to you at `selectText` time (a `TEXT_FETCH`) (KIT-016). Never read any of them through a
+ * latest-props ref. The kit re-creates them per `source.uri`
  * and uses *which handler* delivered a report to drop reports for a source that is no longer live
  * (docs/decisions/0005 §4; KIT-022). An adapter should still cancel its own superseded loads (KIT-023): the
  * kit's gate drops the report, it cannot undo an adapter's internal state. Never call `onTracks` /

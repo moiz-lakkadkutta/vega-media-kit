@@ -1,7 +1,7 @@
 import React, { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Platform } from 'react-native'
 import { CueScheduler, parseVtt, pickAudio } from '../core'
-import type { Cue, PlayerState, Tracks } from '../core'
+import type { Cue, PlayerError, PlayerState, Tracks } from '../core'
 import type { KitPlayerProps, KitPlayerRef } from './types'
 import { resolveAdapter } from './adapters'
 import { acceptsTextTrackData, applyTextSelection, autoSelectedTextIds, sourceChanged } from './selection'
@@ -42,6 +42,8 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
    */
   const onCueRef = useRef(props.onCue)
   onCueRef.current = props.onCue
+  const onErrorRef = useRef(props.onError)
+  onErrorRef.current = props.onError
   const positionRef = useRef(0)
   const tracksRef = useRef<Tracks>({ audio: [], text: [] })
   // Lazy `useRef` rather than `useMemo(..., [])`: React documents `useMemo` as a cache it may discard, and a
@@ -49,6 +51,23 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
   const schedulerRef = useRef<CueScheduler | null>(null)
   if (schedulerRef.current === null) schedulerRef.current = new CueScheduler((active: Cue[]) => onCueRef.current?.(active))
   const scheduler = schedulerRef.current
+
+  /**
+   * The origin gate on `onError`, like `handleTracks` / `handleState`: re-created per `source.uri`, and an error
+   * reported through a handler created for a source that is no longer live is dropped. Adapters report through the
+   * `onError` they held for the load or the `selectText` call the failure belongs to, so a superseded source's
+   * `TEXT_FETCH` (or Vega `SHAKA_*`) arrives here with `sourceUri` = that source. Delivery goes through a
+   * latest-props ref, so an inline `onError={(e) => …}` is never stale and never re-creates this handler (KIT-016).
+   */
+  const handleError = useCallback(
+    (e: PlayerError) => {
+      if (sourceUri !== liveUri.current) return // an error for a source that is no longer live
+      onErrorRef.current?.(e)
+    },
+    [sourceUri],
+  )
+  const handleErrorRef = useRef(handleError)
+  handleErrorRef.current = handleError
 
   /**
    * The one text-selection transition: selected set → prune scheduler tracks → adapter.
@@ -63,7 +82,21 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
       // removeTrack never notifies, so a deselect while paused would leave the last cue on screen
       // until the next onPosition. Re-evaluate at the current position instead.
       if (prune.length) scheduler.update(adapterRef.current?.getPosition() ?? 0)
-      adapterRef.current?.selectText(ids)
+      // Safety net (KIT-016): an adapter whose selectText rejects must not leave an unhandled rejection. `report` is
+      // the handler of the source live *now*, so a rejection that settles after a switch is dropped by its gate.
+      // The web and Fire OS adapters report per track themselves and never reject; this catches anything else.
+      const report = handleErrorRef.current
+      const pending: unknown = adapterRef.current?.selectText(ids)
+      if (pending && typeof (pending as PromiseLike<unknown>).then === 'function') {
+        ;(pending as PromiseLike<unknown>).then(undefined, (e: unknown) => {
+          // Swallowed: an app `onError` that throws must not turn the safety net into an unhandled rejection.
+          try {
+            report({ code: 'TEXT_FETCH', message: 'Could not load text tracks', fatal: false, cause: e })
+          } catch {
+            // nothing left to report to
+          }
+        })
+      }
     },
     [scheduler],
   )
@@ -204,6 +237,7 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
         onPosition={handlePosition}
         onState={handleState}
         onTextTrackData={handleTextTrackData}
+        onError={handleError}
         onCue={props.onCue}
       />
       {props.renderControls?.({ state, position, tracks, ref: api })}

@@ -73,11 +73,23 @@ export const WebAdapter = forwardRef<KitPlayerRef, AdapterProps>(function WebAda
     setVolume: (v) => { if (el.current) el.current.volume = v },
     selectAudio: () => {},
     selectText: async (ids) => {
+      // `props` is this render's: the `onTextTrackData` and `onError` handed over for the source live when
+      // `selectText` was called (AdapterProps origin contract), never a latest-props ref.
       for (const id of ids) {
         const t = tracks.current.text.find((x) => x.id === id)
+        if (!t?.url) continue
         // Manifest-derived urls are HLS subtitle media playlists; fetchHlsVtt joins their segments into one
         // WebVTT body and returns a bare .vtt body (the deprecated header's usual value) unchanged (plan Q7).
-        if (t?.url) props.onTextTrackData?.(id, await fetchHlsVtt(t.url))
+        // One track's failure is reported and the loop goes on: multi-track selection must survive a bad track,
+        // and this promise never rejects (KIT-016).
+        let vtt: string
+        try {
+          vtt = await fetchHlsVtt(t.url)
+        } catch (e) {
+          props.onError?.({ code: 'TEXT_FETCH', message: `Could not load text track ${id}`, fatal: false, cause: e })
+          continue
+        }
+        props.onTextTrackData?.(id, vtt)
       }
     },
     getPosition: () => el.current?.currentTime ?? 0,

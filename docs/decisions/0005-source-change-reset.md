@@ -88,6 +88,11 @@ Adapter-side cancellation remains required for adapter-internal state.
 arrives after the live load reported `playing`/`ended`, and any state through a handler created for a source
 that is no longer live. Refusing is not synthesising; the kit still emits no state of its own.
 
+*Amended (KIT-016):* `onError` is origin-gated the same way — `handleError` is re-created per `source.uri`
+and drops an error from a source that is no longer live, for every code and platform (incl. Vega `SHAKA_*`).
+A rejected adapter `selectText` promise is reported as `TEXT_FETCH` through the handler captured at call time.
+Known limit, shared with `onTracks`/state: A → B → A revives A's first-load handler (same uri).
+
 **4. The race is real and the gate is extended: VTT is accepted only if it was requested for the source
 that is live now.** `acceptsTextTrackData` gating on `selectedText` alone is *not* sufficient. Both web and
 fireos `selectText` are `for … await` loops; a fetch started for source A resolves after the switch. The

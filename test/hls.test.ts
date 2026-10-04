@@ -2,9 +2,11 @@ import { readdirSync, readFileSync } from 'node:fs'
 import {
   audioTracksFromHls,
   isMasterPlaylist,
+  mediaPlaylistUris,
   parseAttributeList,
   parseHlsMaster,
   resolveUrl,
+  subtitleBodyKind,
   textTracksFromHls,
 } from '../src/core'
 
@@ -354,5 +356,64 @@ describe('core stays free of React Native', () => {
     for (const f of files) {
       expect(readFileSync(dir + f, 'utf8')).not.toMatch(/from ['"]react(-native)?['"]/)
     }
+  })
+})
+
+describe('subtitleBodyKind / mediaPlaylistUris (KIT-016)', () => {
+  const MEDIA = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nseg-0.vtt\n#EXTINF:4,\nseg-1.vtt\n#EXT-X-ENDLIST\n'
+
+  it('classifies a WebVTT body as webvtt, tolerating a BOM, CRLF and leading blank lines', () => {
+    expect(subtitleBodyKind('WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n')).toBe('webvtt')
+    expect(subtitleBodyKind('﻿WEBVTT\n\n')).toBe('webvtt')
+    expect(subtitleBodyKind('WEBVTT\r\n\r\n00:00:01.000 --> 00:00:02.000\r\nHi\r\n')).toBe('webvtt')
+    expect(subtitleBodyKind('\n\r\n  \nWEBVTT\n')).toBe('webvtt')
+  })
+
+  it('classifies "WEBVTT - title" and a bare "WEBVTT" as webvtt but "WEBVTTX" as unknown', () => {
+    expect(subtitleBodyKind('WEBVTT - title\n')).toBe('webvtt')
+    expect(subtitleBodyKind('WEBVTT\ttab\n')).toBe('webvtt')
+    expect(subtitleBodyKind('WEBVTT')).toBe('webvtt')
+    expect(subtitleBodyKind('WEBVTTX\n')).toBe('unknown')
+  })
+
+  it('classifies an HTML error page that contains a WEBVTT line further down as unknown', () => {
+    expect(subtitleBodyKind('<!doctype html>\n<html>\n<pre>\nWEBVTT\n</pre>\n</html>\n')).toBe('unknown')
+  })
+
+  it('classifies an empty body, JSON and plain "Not Found" as unknown', () => {
+    expect(subtitleBodyKind('')).toBe('unknown')
+    expect(subtitleBodyKind('  \n\n')).toBe('unknown')
+    expect(subtitleBodyKind('{"error":"not found"}')).toBe('unknown')
+    expect(subtitleBodyKind('Not Found')).toBe('unknown')
+  })
+
+  it('classifies a media playlist (#EXTM3U + #EXTINF) as media-playlist', () => {
+    expect(subtitleBodyKind(MEDIA)).toBe('media-playlist')
+    expect(subtitleBodyKind('﻿' + MEDIA.replace(/\n/g, '\r\n'))).toBe('media-playlist')
+  })
+
+  it('classifies a master playlist as master-playlist', () => {
+    expect(subtitleBodyKind(fx('apple-bipbop-adv-master.m3u8'))).toBe('master-playlist')
+    expect(subtitleBodyKind(fx('angel-one-master.m3u8'))).toBe('master-playlist')
+  })
+
+  it('lists segment URIs in order, skipping tags, comments and blank lines, with CRLF stripped', () => {
+    const text = '﻿#EXTM3U\r\n## a comment\r\n#EXTINF:4,\r\n  a/0.vtt  \r\n\r\n#EXTINF:4,\r\nhttps://x.example/1.vtt\r\n#EXT-X-ENDLIST\r\n'
+    expect(mediaPlaylistUris(text)).toEqual(['a/0.vtt', 'https://x.example/1.vtt'])
+    expect(mediaPlaylistUris(MEDIA)).toEqual(['seg-0.vtt', 'seg-1.vtt'])
+  })
+
+  it('lists no URIs for a playlist without segment lines', () => {
+    expect(mediaPlaylistUris('#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-ENDLIST\n')).toEqual([])
+    expect(mediaPlaylistUris('')).toEqual([])
+  })
+
+  it('the shaka-packager fixture playlist yields its 15 segment URIs, each fixture segment classifies as webvtt', () => {
+    const dir = 'shaka-packager-3.9.3-captions'
+    const playlist = fx(`${dir}/captions.m3u8`)
+    expect(subtitleBodyKind(playlist)).toBe('media-playlist')
+    const uris = mediaPlaylistUris(playlist)
+    expect(uris).toEqual(Array.from({ length: 15 }, (_, i) => `captions/${i + 1}.vtt`))
+    for (const u of uris) expect(subtitleBodyKind(fx(`${dir}/${u.slice(u.lastIndexOf('/') + 1)}`))).toBe('webvtt')
   })
 })

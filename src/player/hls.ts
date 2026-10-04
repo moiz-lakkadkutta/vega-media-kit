@@ -1,4 +1,4 @@
-import { isMasterPlaylist, joinVttSegments, parseHlsMaster, textTracksFromHls } from '../core'
+import { isMasterPlaylist, joinVttSegments, mediaPlaylistUris, parseHlsMaster, subtitleBodyKind, textTracksFromHls } from '../core'
 import type { HlsMaster, TextTrack } from '../core'
 import { DEPRECATION_DOCS, deprecateOnce } from '../platform/log'
 
@@ -77,16 +77,46 @@ export function deprecatedTextUrls(headers: Record<string, string> | undefined):
   }
 }
 
+/** Options for fetchHlsVtt. Only `fetch` — subtitle requests stay header-less (no CORS preflight; unchanged). */
+export type HlsVttOptions = Pick<HlsLoadOptions, 'fetch'>
+
+/** GET `url` and return its body; throws on a non-2xx response without reading the body. */
+async function fetchText(doFetch: HlsFetch, url: string, what: string): Promise<string> {
+  const res = await doFetch(url)
+  if (!res.ok) throw new Error(`Could not fetch the ${what}: ${res.status} for ${url}`)
+  return res.text()
+}
+
 /**
- * Resolve an HLS subtitle media playlist to concatenated WebVTT (segments joined; headers de-duplicated; cues
- * repeated across segment boundaries dropped (RFC 8216 §3.5)).
+ * Resolve an HLS subtitle media playlist (or a bare .vtt) to one WebVTT body: segments joined, headers
+ * de-duplicated, cues repeated across segment boundaries dropped (RFC 8216 §3.5).
+ *
+ * Rejects — and makes no further request — when:
+ *   the URL answers non-2xx                       → Error message contains the status and the url
+ *   the body is 'unknown' or 'master-playlist'    → Error message contains 'not WebVTT' and the url
+ *   a media playlist lists no segments            → Error message contains 'no segments' and the url
+ * Rejects after segment requests when any segment answers non-2xx or its body is not 'webvtt' (message names the
+ * segment url). Network rejections propagate unchanged. The body is classified before any segment is requested,
+ * so a CDN error page never turns into one request per line (KIT-016).
  */
-export async function fetchHlsVtt(url: string): Promise<string> {
-  const res = await fetch(url)
-  const body = await res.text()
-  if (/^WEBVTT/m.test(body) && !body.includes('#EXTM3U')) return body
+export async function fetchHlsVtt(url: string, opts?: HlsVttOptions): Promise<string> {
+  // Read at call time, not module load, so a stubbed global fetch is honoured.
+  const doFetch = opts?.fetch ?? (globalThis.fetch as unknown as HlsFetch)
+  const body = await fetchText(doFetch, url, 'subtitle playlist')
+  const kind = subtitleBodyKind(body)
+  if (kind === 'webvtt') return body
+  if (kind !== 'media-playlist') throw new Error(`Subtitle body is not WebVTT or an HLS media playlist (${kind}) for ${url}`)
+  const uris = mediaPlaylistUris(body)
+  if (uris.length === 0) throw new Error(`Subtitle playlist lists no segments: ${url}`)
+  // Segment URLs are `base + line` — the playlist's own directory (KIT-002 §9 Q5 keeps this as-is).
   const base = url.slice(0, url.lastIndexOf('/') + 1)
-  const segs = body.split('\n').filter((l) => l && !l.startsWith('#')).map((l) => (/^https?:/.test(l) ? l : base + l))
-  const parts = await Promise.all(segs.map((s) => fetch(s).then((r) => r.text())))
+  const segs = uris.map((l) => (/^https?:/.test(l) ? l : base + l))
+  const parts = await Promise.all(
+    segs.map(async (s) => {
+      const part = await fetchText(doFetch, s, 'subtitle segment')
+      if (subtitleBodyKind(part) !== 'webvtt') throw new Error(`Subtitle segment is not WebVTT: ${s}`)
+      return part
+    }),
+  )
   return joinVttSegments(parts)
 }
