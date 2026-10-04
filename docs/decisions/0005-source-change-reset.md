@@ -152,5 +152,10 @@ memo) or `:87-102` (the `api` memo); KIT-012 touches only those. The plan lists 
   (`fireos.tsx:23`) survives a source change and is applied to the new source until `preferredAudio`
   re-selects; (c) adapters should abandon in-flight `selectText` fetches when their source changes — the
   kit-side gate makes this hygiene, not correctness; it belongs with KIT-016.
+- *Resolved (KIT-020, 2026-10-04):* (a) adapters reset per-source state in a layout effect keyed on `source.uri`
+  (Fire OS `95564b2`, web and Vega `24100b5`), and the kit enforces it: `api.getTracks()` answers the kit's own list
+  until the live source's first accepted `onTracks`, then prefers the adapter. `tracksRef` and the published flag are
+  reset before `scheduler.update`, so `getTracks()` read inside the switch's `onCue([])` answers empty. A `selectText`
+  made before the new source's `onTracks` selects nothing and is not replayed.
 - The harness can assert the whole reset end-to-end on web once `harness/player.tsx` exposes
   `__kit.setSource(uri)` and a second fixture stream exists — plan §3 names the spec. Follow-up, not KIT-011.
