@@ -1,4 +1,4 @@
-import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import React, { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react'
 import type { PlayerError, TextTrack, Tracks } from '../../core'
 import type { AdapterProps, KitPlayerRef } from '../types'
 import { deprecatedTextUrls, fetchHlsVtt, loadHlsTextTracks } from '../hls'
@@ -62,6 +62,18 @@ function startPlay(v: HTMLVideoElement, report: (e: PlayerError) => void): void 
 export const WebAdapter = forwardRef<KitPlayerRef, AdapterProps>(function WebAdapter(props, ref) {
   const el = useRef<HTMLVideoElement | null>(null)
   const tracks = useRef<Tracks>({ audio: [], text: [] })
+
+  /**
+   * A `source.uri` change forgets the previous source's tracks — and with them the text urls `selectText` resolves ids
+   * against — in the same commit as KitPlayer's reset, before anything of the new load can run (KIT-020). Without it a
+   * `selectText(['0'])` made during the new load fetched the previous source's playlist for '0' and delivered it through
+   * the live handler (A's captions on B), and a failed new load left the previous list in `getTracks()` for good.
+   * Layout, not passive: child layout effects run before KitPlayer's, so nothing the kit emits during its reset
+   * (`onCue([])`) can observe the old list. A no-op on mount; idempotent under StrictMode. Reports nothing.
+   */
+  useLayoutEffect(() => {
+    tracks.current = { audio: [], text: [] }
+  }, [props.source.uri])
 
   useEffect(() => {
     const v = el.current

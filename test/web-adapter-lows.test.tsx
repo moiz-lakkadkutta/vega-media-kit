@@ -13,7 +13,7 @@ import type { KitPlayerProps, KitPlayerRef } from '../src/player/types'
 vi.mock('react-native', () => ({ Platform: { OS: 'web' } }))
 
 import { KitPlayer } from '../src/player/KitPlayer'
-import { mediaElementError, playRejection } from '../src/player/adapters/web'
+import { WebAdapter, mediaElementError, playRejection } from '../src/player/adapters/web'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const A = 'https://cdn.example/a/master.m3u8'
@@ -82,9 +82,10 @@ let log: string[]
 const onError = vi.fn<(e: PlayerError) => void>((e) => void log.push(`error:${e.code}`))
 const onState = vi.fn<(s: PlayerState) => void>((s) => void log.push(`state:${s}`))
 const onTracks = vi.fn<(t: Tracks) => void>(() => void log.push('tracks'))
-const ctx: { state: PlayerState | null } = { state: null }
-const renderControls = (c: { state: PlayerState }) => {
+const ctx: { state: PlayerState | null; tracks: Tracks | null } = { state: null, tracks: null }
+const renderControls = (c: { state: PlayerState; tracks: Tracks }) => {
   ctx.state = c.state
+  ctx.tracks = c.tracks
   return null
 }
 const video = () => host.querySelector('video') as HTMLVideoElement
@@ -122,6 +123,7 @@ beforeEach(() => {
   stubFetch()
   log = []
   ctx.state = null
+  ctx.tracks = null
   onError.mockClear()
   onState.mockClear()
   onTracks.mockClear()
@@ -431,5 +433,123 @@ describe('WebAdapter + KitPlayer: inline callbacks are never stale (KIT-025 × K
 
     const subs = fetched.filter((u) => u.includes('/subs/'))
     expect(subs).toEqual(['https://cdn.example/a/subs/en/index.m3u8'])
+  })
+})
+
+// ---- KIT-020: tracks never outlive their source --------------------------------------------------------------
+
+describe('WebAdapter + KitPlayer: tracks never outlive their source (KIT-020)', () => {
+  const EMPTY: Tracks = { audio: [], text: [] }
+  const textUrls = (t: Tracks | null | undefined) => (t ? t.text.map((x) => x.url) : null)
+  const A_URLS = ['https://cdn.example/a/subs/de/index.m3u8', 'https://cdn.example/a/subs/en/index.m3u8']
+  const B_URLS = ['https://cdn.example/b/subs/de/index.m3u8', 'https://cdn.example/b/subs/en/index.m3u8']
+  const fetchedUnder = (prefix: string) => fetched.filter((u) => u.startsWith(prefix))
+  async function completeA(extra: Partial<KitPlayerProps> = {}) {
+    render(A, extra)
+    await fire('loadedmetadata')
+    await releaseManifest(A)
+    expect(textUrls(api!.getTracks())).toEqual(A_URLS) // sanity: A's list is in
+  }
+
+  it("getTracks() is empty right after a switch while the new manifest is held, equals renderControls' tracks, and is the new source's list once it lands", async () => {
+    await completeA()
+    render(B)
+
+    expect(api!.getTracks()).toEqual(EMPTY)
+    expect(ctx.tracks).toEqual(EMPTY)
+    await fire('loadedmetadata')
+    expect(api!.getTracks()).toEqual(EMPTY) // the manifest is still held
+    await releaseManifest(B)
+    expect(textUrls(api!.getTracks())).toEqual(B_URLS)
+    expect(api!.getTracks()).toEqual(ctx.tracks)
+  })
+
+  it("selectText(['0']) during the new source's load fetches nothing of the previous source's and delivers no cue", async () => {
+    const onCue = vi.fn<(c: unknown[]) => void>()
+    await completeA({ onCue })
+    render(B, { onCue })
+    act(() => api!.selectText(['0']))
+    await flush()
+
+    expect(fetchedUnder('https://cdn.example/a/subs/')).toEqual([])
+    expect(onCue.mock.calls.filter(([c]) => c.length > 0)).toEqual([])
+  })
+
+  it('after a switch to a source whose media fails before metadata (MEDIA), getTracks() and renderControls stay empty and selectText fetches nothing of the previous source', async () => {
+    await completeA()
+    render(B)
+    await fail(4)
+    await releaseManifest(B)
+    await flush()
+
+    expect(api!.getTracks()).toEqual(EMPTY)
+    expect(ctx.tracks).toEqual(EMPTY)
+    expect(onTracks).toHaveBeenCalledTimes(1) // A's
+    act(() => api!.selectText(['0']))
+    await flush()
+    expect(fetchedUnder('https://cdn.example/a/subs/')).toEqual([])
+  })
+
+  it("a load that fails after loadedmetadata keeps its own published tracks: getTracks() equals renderControls' tracks", async () => {
+    render(A)
+    await fire('loadedmetadata')
+    await fail(3)
+    await releaseManifest(A)
+
+    expect(ctx.state).toBe('error')
+    expect(textUrls(api!.getTracks())).toEqual(A_URLS)
+    expect(api!.getTracks()).toEqual(ctx.tracks)
+
+    // And an error after the join (tracks already published) does not clear them either (R-W3/R-K5).
+    Object.defineProperty(video(), 'error', { configurable: true, get: () => null }) // the load algorithm clears it
+    render(B)
+    await fire('loadedmetadata')
+    await releaseManifest(B)
+    await fail(3)
+    expect(ctx.state).toBe('error')
+    expect(textUrls(api!.getTracks())).toEqual(B_URLS)
+    expect(api!.getTracks()).toEqual(ctx.tracks)
+  })
+
+  it('WebAdapter alone: getTracks() is empty right after source.uri changes, without KitPlayer', async () => {
+    let adapter: KitPlayerRef | null = null
+    const setAdapter = (r: KitPlayerRef | null) => {
+      adapter = r
+    }
+    const handlers = { onTracks: vi.fn(), onState: vi.fn(), onError: vi.fn(), onTextTrackData: vi.fn() }
+    const renderAdapter = (uri: string) =>
+      act(() => root.render(<WebAdapter ref={setAdapter} source={{ uri, type: 'hls' }} testID="v" {...handlers} />))
+    renderAdapter(A)
+    await fire('loadedmetadata')
+    await releaseManifest(A)
+    expect(textUrls(adapter!.getTracks())).toEqual(A_URLS)
+
+    renderAdapter(B)
+    expect(adapter!.getTracks()).toEqual(EMPTY)
+    await act(async () => {
+      await adapter!.selectText(['0'])
+    })
+    expect(fetchedUnder('https://cdn.example/a/subs/')).toEqual([])
+    expect(handlers.onTextTrackData).not.toHaveBeenCalled()
+  })
+
+  it("getTracks() inside onTracks and inside onState('ready') answers the new source's list after a switch", async () => {
+    const inTracks: unknown[] = []
+    const inReady: unknown[] = []
+    const extra: Partial<KitPlayerProps> = {
+      onTracks: () => void inTracks.push(textUrls(api!.getTracks())),
+      onState: (s) => {
+        if (s === 'ready') inReady.push(textUrls(api!.getTracks()))
+      },
+    }
+    render(A, extra)
+    await fire('loadedmetadata')
+    await releaseManifest(A)
+    render(B, extra)
+    await fire('loadedmetadata')
+    await releaseManifest(B)
+
+    expect(inTracks).toEqual([A_URLS, B_URLS])
+    expect(inReady).toEqual([A_URLS, B_URLS])
   })
 })

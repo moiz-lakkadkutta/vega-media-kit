@@ -23,6 +23,12 @@ export interface KitPlayerRef {
   /** Multiple text tracks on purpose (two languages; captions + descriptions). */
   selectText(trackIds: string[]): void
   getPosition(): number
+  /**
+   * The live source's tracks. Empty from a `source` change (and on mount) until that source's `onTracks` — the same
+   * list `renderControls` is handed; never a previous source's. Ids are only valid for the source that reported them
+   * (decision 0004): a `selectText` made with ids from before the live source's `onTracks` selects nothing and is not
+   * replayed once the tracks arrive — select from this source's list (KIT-020).
+   */
   getTracks(): Tracks
 }
 
@@ -84,7 +90,9 @@ export interface KitPlayerProps {
  * kit's gate drops the report, it cannot undo an adapter's internal state. Never call `onTracks` /
  * `onTextTrackData` / `onState` for a new source synchronously during render or from your own layout effects /
  * `useImperativeHandle`: child layout effects run before KitPlayer's reset updates the live uri, so such a report
- * would be refused.
+ * would be refused. `getTracks()` and anything resolved from it (text urls) must not answer a previous source after
+ * `source.uri` changes: reset per-source state in a layout effect keyed on `source.uri` (KIT-020) — resetting is not
+ * reporting, so this is allowed where reports are not.
  *
  * State contract for one load: report `loading` when the load begins; report `onTracks` exactly once when the track
  * list is complete (docs/decisions/0004) — none if the load fails first — and `ready` immediately after it, from the

@@ -60,6 +60,14 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
   prefsRef.current = { audio: props.preferredAudio, text: props.preferredText }
   const positionRef = useRef(0)
   const tracksRef = useRef<Tracks>({ audio: [], text: [] })
+  /**
+   * Whether the live source's tracks have been reported: its first `onTracks` passed the origin gate. Until then
+   * `getTracks()` answers the kit's own list — empty since the reset, what `renderControls` shows — never the adapter's,
+   * which may still hold a superseded source's (KIT-020; every adapter resets its own too, but the kit does not rely on
+   * it — 0005 §3). Afterwards the adapter is preferred again: it can be fresher than the last `onTracks` (Fire OS marks
+   * the `selectAudio` pick active without re-publishing, KIT-029).
+   */
+  const tracksPublished = useRef(false)
   // Lazy `useRef` rather than `useMemo(..., [])`: React documents `useMemo` as a cache it may discard, and a
   // discarded scheduler is exactly the defect above — its tracks are state, not a recomputable value.
   const schedulerRef = useRef<CueScheduler | null>(null)
@@ -129,6 +137,7 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
     (t: Tracks) => {
       if (sourceUri !== liveUri.current) return // a report for a source that is no longer live
       tracksRef.current = t
+      tracksPublished.current = true // before the app's onTracks and the auto-selection, which may read getTracks()
       setTracks(t)
       onTracksRef.current?.(t)
       if (!appliedPrefs.current && adapterRef.current) {
@@ -213,10 +222,13 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
     selectedText.current = applyTextSelection([], scheduler.tracks).selected // refuse VTT first
     appliedPrefs.current = false // the new source's first onTracks re-applies preferredAudio/preferredText
     readyClosed.current = false // the new load's ready is reported unless it, too, is already playing (or failed)
+    // Before `scheduler.update` below: an app reading `getTracks()` in the `onCue([])` it emits gets the empty list
+    // (KIT-020), not the previous source's from either the adapter or the kit's own fallback.
+    tracksPublished.current = false
+    tracksRef.current = { audio: [], text: [] }
     for (const t of scheduler.tracks) scheduler.removeTrack(t) // the getter copies, so removing while iterating is safe
     scheduler.update(start) // removeTrack never notifies; this emits onCue([]) iff cues were on screen
     setTracks({ audio: [], text: [] }) // renderControls must not show the previous source's tracks
-    tracksRef.current = { audio: [], text: [] }
     setPosition(start)
     positionRef.current = start
     // The adapter is not told selectText([]): it is reloading, and the deselect would race the load.
@@ -238,7 +250,8 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
       selectAudio: (id) => adapterRef.current?.selectAudio(id),
       selectText,
       getPosition: () => adapterRef.current?.getPosition() ?? positionRef.current,
-      getTracks: () => adapterRef.current?.getTracks() ?? tracksRef.current,
+      // The kit's own list until the live source has reported (see `tracksPublished`); then the adapter's.
+      getTracks: () => (tracksPublished.current ? adapterRef.current?.getTracks() ?? tracksRef.current : tracksRef.current),
     }),
     [scheduler, selectText], // both stable, so `api` is created once and `renderControls`' `ref` never changes
   )

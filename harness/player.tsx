@@ -47,6 +47,8 @@ declare global {
       diag: { releasedAt: { videoSrc: string | null } | null; handover: { rendered: string; videoSrc: string | null } | null }
       /** The state KitPlayer last handed to renderControls (spec 26). */
       state(): PlayerState
+      /** The `tracks` KitPlayer last handed to renderControls (KIT-020: `getTracks()` must equal it during a load). */
+      tracks(): Tracks
       /** `String(reason.name ?? reason)` of every `unhandledrejection` on the page (KIT-025: must stay empty). */
       unhandled: string[]
       /** App renders so far — the generation an inline callback was created in (KIT-025, `?inlineCallbacks=1`). */
@@ -111,6 +113,7 @@ const kit: Window['__kit'] = {
   },
   diag: { releasedAt: null, handover: null },
   state: () => kitState,
+  tracks: () => kitTracks,
   unhandled: [],
   gen: () => gen,
   calledGen: { state: null, position: null },
@@ -163,6 +166,7 @@ const refs = new Set<KitPlayerRef>()
 let renders = 0
 let gen = 0
 let kitState: PlayerState = 'idle'
+let kitTracks: Tracks = { audio: [], text: [] }
 const onCue = (active: Cue[]) => {
   kit.active = active
   log({ type: 'cue', ids: active.map((c) => `${c.trackId}:${c.id}`) })
@@ -229,6 +233,7 @@ function App() {
           refs.add(ctx.ref)
           renders++
           kitState = ctx.state
+          kitTracks = ctx.tracks
           return null
         }}
         testID="kit-video"

@@ -1,8 +1,9 @@
-import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import React, { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react'
 import { fromShakaText, fromShakaVariants } from '../../core'
 import type { Cue, Tracks } from '../../core'
 import type { AdapterProps, KitPlayerRef } from '../types'
 import { VEGA_DOCS, warnOnce } from '../../platform/log'
+import { requireShaka, requireW3cMedia } from './w3c'
 
 /**
  * Vega adapter over @amazon-devices/react-native-w3cmedia with Shaka Player as the MSE engine.
@@ -13,13 +14,17 @@ import { VEGA_DOCS, warnOnce } from '../../platform/log'
  * Everything marked TODO(spike) is expected to change in name only.
  */
 export const VegaAdapter = forwardRef<KitPlayerRef, AdapterProps>(function VegaAdapter(props, ref) {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const w3c = require('@amazon-devices/react-native-w3cmedia') as { VideoPlayer: React.ComponentType<Record<string, unknown>> }
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const shaka = require('shaka-player') as typeof import('shaka-player') // installed via the sample's post-install step
+  const w3c = requireW3cMedia()
+  const shaka = requireShaka()
   const media = useRef<HTMLMediaElement | null>(null)
   const player = useRef<InstanceType<typeof shaka.Player> | null>(null)
   const tracks = useRef<Tracks>({ audio: [], text: [] })
+
+  /** A `source.uri` change forgets the previous source's tracks in the same commit as KitPlayer's reset (KIT-020).
+   *  KIT-010: a superseded load must never write `tracks` afterwards — see the plan §6. */
+  useLayoutEffect(() => {
+    tracks.current = { audio: [], text: [] }
+  }, [props.source.uri])
 
   useEffect(() => {
     const el = media.current

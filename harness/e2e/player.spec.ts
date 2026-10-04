@@ -22,6 +22,8 @@ import { cueIds, deferred, events, metadataLoaded, routeStream } from './helpers
  * an interrupted `play()` is never an unhandled rejection (37–38); `playing` is reported when the element is playing,
  * not when `play()` was called, so an autoplay load can report `ready` first (39–40); inline `onState`/`onPosition`
  * reach the latest callbacks (41); an autoplay the browser refuses is one non-fatal `PLAY_REJECTED` (42).
+ * Specs 43–45 (KIT-020): `getTracks()` never answers a superseded source and equals `renderControls`' `tracks` during
+ * a load and after a failed one.
  */
 const BASE = 'http://localhost:4173'
 const trackEvents = (page: Page) => events(page).then((e) => e.filter((x) => x.type === 'tracks'))
@@ -612,4 +614,58 @@ test('inline onState/onPosition: after re-renders the next state and position re
   await expect.poll(() => page.evaluate(() => window.__kit.positionTicks), { timeout: 5_000 }).toBeGreaterThanOrEqual(1)
   expect(await page.evaluate(() => window.__kit.gen())).toBe(gen) // nothing re-rendered App meanwhile
   expect(await page.evaluate(() => window.__kit.calledGen)).toEqual({ state: gen, position: gen })
+})
+
+// ---- KIT-020: getTracks() never answers a superseded source ------------------------------------------------------
+
+const EMPTY_TRACKS = { audio: [], text: [] }
+const getTracks = (page: Page) => page.evaluate(() => window.__kit.ref!.getTracks())
+const controlsTracks = (page: Page) => page.evaluate(() => window.__kit.tracks())
+
+test("getTracks() is empty while B's manifest is held after A, equals renderControls' tracks, and is B's list once it lands (KIT-020)", async ({ page }) => {
+  const b = deferred()
+  await routeStream(page, { hold: { 'master-b': b.promise } })
+  await page.goto('/player.html')
+  await waitForTracks(page)
+  expect((await getTracks(page)).text).toEqual(MANIFEST_TRACKS)
+
+  await setSource(page, '/stream/master-b')
+  expect(await getTracks(page)).toEqual(EMPTY_TRACKS)
+  expect(await controlsTracks(page)).toEqual(EMPTY_TRACKS)
+  await page.waitForTimeout(300) // B's metadata is in; only its manifest is held
+  expect(await getTracks(page)).toEqual(EMPTY_TRACKS)
+
+  b.resolve()
+  await expect.poll(() => trackEvents(page).then((t) => t.length)).toBe(2)
+  expect((await getTracks(page)).text).toEqual(MANIFEST_TRACKS_B)
+  expect(await getTracks(page)).toEqual(await controlsTracks(page))
+})
+
+test("selectText(['0']) while B's manifest is held fetches nothing of A's and shows no cue (KIT-020)", async ({ page }) => {
+  const b = deferred()
+  const hits = await routeStream(page, { hold: { 'master-b': b.promise } })
+  await page.goto('/player.html')
+  await waitForTracks(page)
+  const aSubs = () => hits.filter((h) => h.startsWith('fetch subs/de/')).length
+  expect(aSubs()).toBe(0) // no preferredText: nothing of A's was selected
+
+  await setSource(page, '/stream/master-b')
+  await selectText(page, ['0'])
+  await page.waitForTimeout(500)
+  expect(aSubs()).toBe(0) // A's '0' is `de`: its playlist would be fetched here
+  expect(await cueText(page, 2)).toEqual([]) // A's 'Hallo Welt' would show here
+  b.resolve() // let the held route settle before the page closes
+})
+
+test("after a switch to a source whose media answers 404, getTracks() stays empty — not the previous source's — and equals renderControls (KIT-020 × KIT-025)", async ({ page }) => {
+  await routeStream(page, { mediaRespond: { 'master-b': { status: 404, body: 'Not Found' } } })
+  await page.goto('/player.html')
+  await waitForTracks(page)
+
+  await setSource(page, '/stream/master-b')
+  await expect.poll(() => page.evaluate(() => window.__kit.state())).toBe('error')
+  await page.waitForTimeout(500) // B's manifest is real and fast: a join that completed would have published by now
+  expect(await getTracks(page)).toEqual(EMPTY_TRACKS)
+  expect(await controlsTracks(page)).toEqual(EMPTY_TRACKS)
+  expect(await trackEvents(page)).toHaveLength(1) // A's
 })

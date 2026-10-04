@@ -32,6 +32,12 @@ import { KitPlayer } from '../src/player/KitPlayer'
 let latest: { props: AdapterProps | null } = { props: null }
 /** One shared url map, overwritten by every *completed* load before it publishes — pre-KIT-023 Fire OS shape. */
 let textUrls = new Map<string, string>()
+/**
+ * What the double's `getTracks()` answers (KIT-020): overwritten by every *completed* load — a refused stale one too —
+ * and never reset on a switch: an adapter that keeps the previous list and does not cancel (web/Vega before KIT-020).
+ * `selectAudio` marks the pick active without re-publishing (the Fire OS KIT-029 shape).
+ */
+let adapterTracks: Tracks = { audio: [], text: [] }
 const selectTextCalls: string[][] = []
 const selectAudioCalls: string[] = []
 const setVolumeCalls: number[] = []
@@ -55,6 +61,7 @@ const Double = forwardRef<KitPlayerRef, AdapterProps>(function Double(props, ref
     },
     selectAudio: (id: string) => {
       selectAudioCalls.push(id)
+      adapterTracks = { ...adapterTracks, audio: adapterTracks.audio.map((a) => ({ ...a, active: a.id === id })) }
     },
     selectText: (ids: string[]) => {
       selectTextCalls.push([...ids])
@@ -65,7 +72,7 @@ const Double = forwardRef<KitPlayerRef, AdapterProps>(function Double(props, ref
       }
     },
     getPosition: () => 0,
-    getTracks: () => ({ audio: [], text: [] }),
+    getTracks: () => adapterTracks,
   }))
   return null
 })
@@ -82,6 +89,7 @@ function beginLoad() {
   return {
     complete(t: Tracks) {
       act(() => {
+        adapterTracks = t
         textUrls = new Map(t.text.flatMap((x) => (x.url ? [[x.id, x.url] as const] : [])))
         onTracks?.(t)
         onState?.('ready')
@@ -169,14 +177,15 @@ beforeEach(() => {
   fake.current = Double
   latest = { props: null }
   textUrls = new Map()
+  adapterTracks = { audio: [], text: [] }
   selectTextCalls.length = 0
   selectAudioCalls.length = 0
   setVolumeCalls.length = 0
   selectTextImpl = null
   onError.mockClear()
-  onTracks.mockClear()
+  onTracks.mockReset() // K2 gives it an implementation
   onState.mockClear()
-  onCue.mockClear()
+  onCue.mockReset() // K4 gives it an implementation
   ctx.tracks = null
   ctx.state = null
   root = createRoot(document.createElement('div'))
@@ -600,5 +609,86 @@ describe('KitPlayer latest-props callbacks and the origin gates (KIT-025)', () =
     beginLoad().complete(TRACKS_B)
     expect(onState.mock.calls).toEqual([['error'], ['ready']])
     expect(ctx.state).toBe('ready')
+  })
+})
+
+describe('KitPlayer getTracks gate: the adapter is not asked until the live source has reported (KIT-020)', () => {
+  const EMPTY: Tracks = { audio: [], text: [] }
+  const desc = { id: 'a1', language: 'en', label: 'English (AD)', roles: ['description' as const], active: false }
+  /** B with a second audio rendition, so an audio pick the adapter marks is observable. */
+  const TRACKS_B2: Tracks = { ...TRACKS_B, audio: [main, desc] }
+
+  it("answers the empty list from a source change until the new source's onTracks, though the adapter still holds the previous list", () => {
+    render('A')
+    beginLoad().complete(TRACKS_A)
+    expect(api!.getTracks()).toEqual(TRACKS_A)
+
+    render('B')
+    expect(adapterTracks).toEqual(TRACKS_A) // the double kept the previous list
+    expect(api!.getTracks()).toEqual(EMPTY)
+    expect(api!.getTracks()).toEqual(ctx.tracks)
+
+    beginLoad().complete(TRACKS_B)
+    expect(api!.getTracks()).toEqual(TRACKS_B)
+  })
+
+  it("prefers the adapter once the live source's onTracks is accepted: an audio pick the adapter marks is visible (KIT-029)", () => {
+    render('A')
+    beginLoad().complete(TRACKS_A)
+    render('B')
+    beginLoad().complete(TRACKS_B2)
+    act(() => api!.selectAudio('a1'))
+
+    expect(api!.getTracks().audio.map((a) => [a.id, a.active])).toEqual([
+      ['a0', false],
+      ['a1', true],
+    ])
+
+    // Already inside the live source's onTracks: an app that picks audio there reads the adapter's marking.
+    const inOnTracks: unknown[] = []
+    onTracks.mockImplementation(() => {
+      api!.selectAudio('a1')
+      inOnTracks.push(api!.getTracks().audio.find((a) => a.id === 'a1')?.active)
+    })
+    render('C')
+    beginLoad().complete(TRACKS_B2)
+    expect(inOnTracks).toEqual([true])
+  })
+
+  it("a superseded load's onTracks, refused by the origin gate, does not open the gate: getTracks() stays empty", () => {
+    render('A')
+    const loadA = beginLoad()
+    render('B')
+    loadA.complete(TRACKS_A)
+
+    expect(onTracks).not.toHaveBeenCalled()
+    expect(adapterTracks).toEqual(TRACKS_A) // the double wrote it; the kit refused it
+    expect(api!.getTracks()).toEqual(EMPTY)
+  })
+
+  it('getTracks() read from the onCue([]) the switch emits answers the empty list', () => {
+    const seen: Tracks[] = []
+    onCue.mockImplementation((c) => {
+      if (c.length === 0) seen.push(api!.getTracks())
+    })
+    render('A')
+    beginLoad().complete(TRACKS_A) // PREF selects 'de' = '0'; the double delivers its VTT synchronously
+    seek(2)
+    expect(lastCueTexts()).toEqual(['A/0']) // a cue is on screen
+    seen.length = 0
+
+    render('B')
+    expect(seen).toEqual([EMPTY]) // the reset's onCue([]) — exactly one
+  })
+
+  it("on first mount getTracks() is empty until the first onTracks, then the adapter's answer", () => {
+    adapterTracks = TRACKS_A // an adapter that does not start empty
+    render('B')
+    expect(api!.getTracks()).toEqual(EMPTY)
+
+    beginLoad().complete(TRACKS_B2)
+    expect(api!.getTracks()).toEqual(TRACKS_B2)
+    act(() => api!.selectAudio('a1'))
+    expect(api!.getTracks().audio.find((a) => a.id === 'a1')?.active).toBe(true) // the adapter's, not the kit's copy
   })
 })
