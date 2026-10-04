@@ -34,17 +34,22 @@ const MEDIA_MESSAGES: Record<number, string> = {
   4: 'The media source is not supported or could not be loaded',
 }
 
-// ---- fetch: the master playlist is held per uri until released; anything else (subtitle playlists) hangs ----------
+// ---- fetch: the master playlist is held per uri until released; a subtitle url a test put in `subtitleBodies` is
+// answered at once with that body; anything else hangs ---------------------------------------------------------------
 
 let manifestGates: Map<string, () => void>
 let fetched: string[]
+let subtitleBodies: Map<string, string>
 function stubFetch() {
   manifestGates = new Map()
   fetched = []
+  subtitleBodies = new Map()
   vi.stubGlobal(
     'fetch',
     vi.fn((url: string) => {
       fetched.push(url)
+      const sub = subtitleBodies.get(url)
+      if (sub !== undefined) return Promise.resolve({ ok: true, status: 200, url, text: async () => sub })
       if (url !== A && url !== B) return new Promise(() => {})
       return new Promise((resolve) => {
         manifestGates.set(url, () => resolve({ ok: true, status: 200, url, text: async () => MASTER }))
@@ -488,6 +493,31 @@ describe('WebAdapter + KitPlayer: tracks never outlive their source (KIT-020)', 
     act(() => api!.selectText(['0']))
     await flush()
     expect(fetchedUnder('https://cdn.example/a/subs/')).toEqual([])
+  })
+
+  it("selectText(['0']) from inside the onCue([]) a switch emits fetches nothing of the previous source's and delivers none of its cues (reset is layout, not passive)", async () => {
+    // Pins the layout placement of the adapter reset (plan §7 M2): the kit emits onCue([]) from its reset layout
+    // effect, before any passive cleanup of the switch's commit has run.
+    subtitleBodies.set(A_URLS[0]!, 'WEBVTT\n\n00:00:00.000 --> 00:00:10.000\nHallo von A\n')
+    let armed = false
+    const onCue = vi.fn<(c: { text: string }[]) => void>((c) => {
+      if (armed && c.length === 0) api!.selectText(['0'])
+    })
+    const extra: Partial<KitPlayerProps> = { onCue, preferredText: { languages: ['de'] } }
+    await completeA(extra) // A's '0' is `de`: auto-selected, its VTT lands
+    act(() => void api!.seek(2))
+    expect(onCue.mock.calls.at(-1)![0].map((c) => c.text)).toEqual(['Hallo von A']) // a cue is on screen
+    const aFetches = fetchedUnder('https://cdn.example/a/subs/').length
+
+    armed = true
+    render(B, extra) // the reset's onCue([]) calls selectText(['0']) while B's manifest is held
+    armed = false
+    await flush()
+    act(() => void api!.seek(2))
+
+    expect(onCue.mock.calls.some(([c]) => c.length === 0)).toBe(true) // the callback did run
+    expect(fetchedUnder('https://cdn.example/a/subs/')).toHaveLength(aFetches)
+    expect(onCue.mock.calls.at(-1)![0]).toEqual([]) // no A VTT delivered through B
   })
 
   it("a load that fails after loadedmetadata keeps its own published tracks: getTracks() equals renderControls' tracks", async () => {
