@@ -217,7 +217,7 @@ export function mediaPlaylistUris(text: string): string[] {
   return playlistLines(text).filter((line) => !line.startsWith('#'))
 }
 
-const MEDIA_TYPES: HlsMediaType[] =['AUDIO', 'VIDEO', 'SUBTITLES', 'CLOSED-CAPTIONS']
+const MEDIA_TYPES: HlsMediaType[] = ['AUDIO', 'VIDEO', 'SUBTITLES', 'CLOSED-CAPTIONS']
 
 const yes = (v: string | undefined): boolean => v === 'YES'
 

@@ -431,9 +431,11 @@ test('preferredText={kinds:["descriptions"]} selects the descriptions rendition 
 
 const errorEvents = (page: Page) => events(page).then((e) => e.filter((x) => x.type === 'error'))
 const TEXT_FETCH = { type: 'error', code: 'TEXT_FETCH', fatal: false }
+/** A valid WebVTT body on a 404: only the status check can reject it (KIT-016 M1). */
+const NOT_FOUND_VTT = 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nshould never be shown\n'
 
 test('a subtitle playlist answering 404 reaches onError as one non-fatal TEXT_FETCH and nothing else is fetched for that track (KIT-016)', async ({ page }) => {
-  const hits = await routeStream(page, { respond: { 'subs/en/index.m3u8': { status: 404, body: 'Not Found' } } })
+  const hits = await routeStream(page, { respond: { 'subs/en/index.m3u8': { status: 404, body: NOT_FOUND_VTT } } })
   await page.goto('/player.html?preferred=' + encodeURIComponent('{"languages":["en"]}'))
   await expect.poll(() => errorEvents(page)).toEqual([expect.objectContaining(TEXT_FETCH)])
   await page.waitForTimeout(300) // a storm would be in flight by now

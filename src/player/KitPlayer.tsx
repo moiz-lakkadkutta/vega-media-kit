@@ -83,9 +83,14 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
       const report = handleErrorRef.current
       const pending: unknown = adapterRef.current?.selectText(ids)
       if (pending && typeof (pending as PromiseLike<unknown>).then === 'function') {
-        ;(pending as PromiseLike<unknown>).then(undefined, (e: unknown) =>
-          report({ code: 'TEXT_FETCH', message: 'Could not load text tracks', fatal: false, cause: e }),
-        )
+        ;(pending as PromiseLike<unknown>).then(undefined, (e: unknown) => {
+          // Swallowed: an app `onError` that throws must not turn the safety net into an unhandled rejection.
+          try {
+            report({ code: 'TEXT_FETCH', message: 'Could not load text tracks', fatal: false, cause: e })
+          } catch {
+            // nothing left to report to
+          }
+        })
       }
     },
     [scheduler],

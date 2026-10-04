@@ -433,6 +433,34 @@ describe('KitPlayer onError origin gate and selectText safety net (KIT-016)', ()
     expect(second.mock.calls).toEqual([[ERR]])
   })
 
+  it('does not leave an unhandled rejection when onError throws', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (r: unknown) => unhandled.push(r)
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      // The web adapter's shape: an async selectText that reports through the onError it was handed. The app's
+      // onError throws, so the adapter's promise rejects and the safety net reports again — that must not throw.
+      selectTextImpl = async (_ids, props) => {
+        props.onError?.(ERR)
+      }
+      const thrower = vi.fn<(e: PlayerError) => void>(() => {
+        throw new Error('app onError threw')
+      })
+      render('A', PREF_EMPTY, thrower)
+      beginLoad().complete(TRACKS_A)
+      selectText(['0'])
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0))
+      })
+      await new Promise((r) => setTimeout(r, 10))
+
+      expect(thrower).toHaveBeenCalled()
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+  })
+
   it('does not report an error twice when the adapter both reports TEXT_FETCH and resolves', async () => {
     selectTextImpl = (ids, props) => {
       props.onError?.({ ...ERR, message: `Could not load text track ${ids[0]}` })
