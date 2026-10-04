@@ -16,22 +16,33 @@ export interface ParseOptions {
 
 const TIME_RE = /(?:(\d{1,2}):)?(\d{1,2}):(\d{2})[.,](\d{3})/
 
-export function parseTimestamp(s: string): number | null {
+/** A WebVTT timestamp as whole milliseconds (integer arithmetic only), or null. */
+function parseTimestampMs(s: string): number | null {
   const m = TIME_RE.exec(s.trim())
   if (!m) return null
   const h = m[1] ? parseInt(m[1], 10) : 0
   const min = parseInt(m[2]!, 10)
   const sec = parseInt(m[3]!, 10)
   const ms = parseInt(m[4]!, 10)
-  return h * 3600 + min * 60 + sec + ms / 1000
+  return ((h * 60 + min) * 60 + sec) * 1000 + ms
+}
+
+/**
+ * A WebVTT timestamp in seconds, millisecond-exact: summed in integer milliseconds and divided once, so
+ * `00:00:03.837` is exactly `3.837` (not `3.8369999999999997`). Cue times compare with `===` across parses.
+ */
+export function parseTimestamp(s: string): number | null {
+  const ms = parseTimestampMs(s)
+  return ms === null ? null : ms / 1000
 }
 
 export function formatTimestamp(t: number): string {
-  const total = Math.max(0, t)
-  const h = Math.floor(total / 3600)
-  const m = Math.floor((total % 3600) / 60)
-  const s = Math.floor(total % 60)
-  const ms = Math.round((total - Math.floor(total)) * 1000)
+  // Round to whole milliseconds first, then split with integer arithmetic (no `.1000` carry).
+  const total = Math.round(Math.max(0, t) * 1000)
+  const h = Math.floor(total / 3_600_000)
+  const m = Math.floor(total / 60_000) % 60
+  const s = Math.floor(total / 1000) % 60
+  const ms = total % 1000
   const pad = (n: number, w = 2) => String(n).padStart(w, '0')
   return `${pad(h)}:${pad(m)}:${pad(s)}.${pad(ms, 3)}`
 }
@@ -84,10 +95,11 @@ function parseMeta(raw: string): { text: string; meta?: Record<string, string> }
 }
 
 export function parseVtt(input: string, opts: ParseOptions): Cue[] {
-  const minDuration = opts.minDuration ?? 0.833
-  const mergeGap = opts.mergeGap ?? 0.04
+  // Cue times are kept in whole milliseconds until the end (KIT-030); options are rounded to ms once.
+  const minDurationMs = Math.round((opts.minDuration ?? 0.833) * 1000)
+  const mergeGapMs = Math.round((opts.mergeGap ?? 0.04) * 1000)
   const lines = input.replace(/\r\n?/g, '\n').split('\n')
-  const cues: Cue[] = []
+  const cues: Array<{ cue: Cue; s: number; e: number }> = []
   let i = 0
   // header
   while (i < lines.length && lines[i]!.trim() === '') i++
@@ -117,9 +129,9 @@ export function parseVtt(input: string, opts: ParseOptions): Cue[] {
       i++
       continue
     }
-    const start = parseTimestamp(arrow[0]!)
+    const start = parseTimestampMs(arrow[0]!)
     const rest = arrow[1]!.trim().split(/\s+/)
-    const end = parseTimestamp(rest[0] ?? '')
+    const end = parseTimestampMs(rest[0] ?? '')
     if (start === null || end === null) {
       i++
       continue
@@ -139,26 +151,34 @@ export function parseVtt(input: string, opts: ParseOptions): Cue[] {
     const cleaned = cleanText(withoutMeta)
     if (!cleaned.text) continue
     cues.push({
-      trackId: opts.trackId,
-      id: id ?? `c${++autoId}`,
-      start,
-      end: Math.max(end, start + minDuration),
-      text: cleaned.text,
-      ...(line ? { line } : {}),
-      ...(cleaned.speaker ? { speaker: cleaned.speaker } : {}),
-      ...(cleaned.sound ? { sound: true } : {}),
-      ...(meta ? { meta } : {}),
+      cue: {
+        trackId: opts.trackId,
+        id: id ?? `c${++autoId}`,
+        start: 0,
+        end: 0,
+        text: cleaned.text,
+        ...(line ? { line } : {}),
+        ...(cleaned.speaker ? { speaker: cleaned.speaker } : {}),
+        ...(cleaned.sound ? { sound: true } : {}),
+        ...(meta ? { meta } : {}),
+      },
+      s: start,
+      e: Math.max(end, start + minDurationMs),
     })
   }
-  cues.sort((a, b) => a.start - b.start || a.end - b.end)
+  cues.sort((a, b) => a.s - b.s || a.e - b.e)
   // merge tiny gaps and prevent overlaps created by minDuration extension
   for (let k = 0; k < cues.length - 1; k++) {
     const a = cues[k]!
     const b = cues[k + 1]!
-    if (b.start - a.end > 0 && b.start - a.end < mergeGap) a.end = b.start
-    if (a.end > b.start && a.start !== b.start) a.end = b.start
+    if (b.s - a.e > 0 && b.s - a.e < mergeGapMs) a.e = b.s
+    if (a.e > b.s && a.s !== b.s) a.e = b.s
   }
-  return cues
+  return cues.map(({ cue, s, e }) => {
+    cue.start = s / 1000
+    cue.end = e / 1000
+    return cue
+  })
 }
 
 /**
@@ -199,18 +219,16 @@ export function joinVttSegments(segments: readonly string[]): string {
       }
       const timing = lines[ti]!
       const [head, tail] = timing.split('-->')
-      const start = parseTimestamp(head!)
+      const s = parseTimestampMs(head!)
       const rest = tail!.trim().split(/\s+/)
-      const end = parseTimestamp(rest[0]!)
-      if (start === null || end === null) {
+      const e = parseTimestampMs(rest[0]!)
+      if (s === null || e === null) {
         kept.push(block)
         continue
       }
       const settings = rest.slice(1).join(' ')
       const payload = lines.slice(ti + 1).join('\n').trim()
       const key = settings + '\n' + payload
-      const s = Math.round(start * 1000)
-      const e = Math.round(end * 1000)
       if (seen.get(key)?.some(([S, E]) => S <= s && e <= E)) continue
       local.push([key, [s, e]])
       kept.push(block)

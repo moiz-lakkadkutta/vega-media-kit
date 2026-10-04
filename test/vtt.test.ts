@@ -3,6 +3,15 @@ import { parseVtt, serializeVtt, lintCues, parseTimestamp, formatTimestamp, join
 
 const fx = (n: string) => readFileSync(new URL(`./fixtures/${n}`, import.meta.url).pathname, 'utf8')
 
+// KIT-030: cue times are the decimal value rounded to milliseconds, summed in integer ms and divided once.
+const fmt = (ms: number, hours = true) => {
+  const pad = (n: number, w = 2) => String(n).padStart(w, '0')
+  const h = Math.floor(ms / 3_600_000)
+  const m = Math.floor(ms / 60_000) % 60
+  const s = Math.floor(ms / 1000) % 60
+  return `${hours ? pad(h) + ':' : ''}${pad(m)}:${pad(s)}.${pad(ms % 1000, 3)}`
+}
+
 describe('timestamps', () => {
   it('parses HH:MM:SS.mmm and MM:SS.mmm', () => {
     expect(parseTimestamp('00:01:02.500')).toBe(62.5)
@@ -12,6 +21,38 @@ describe('timestamps', () => {
   })
   it('round-trips', () => {
     expect(formatTimestamp(3723.042)).toBe('01:02:03.042')
+  })
+
+  it('parses 00:00:03.837 to exactly 3.837', () => {
+    expect(parseTimestamp('00:00:03.837')).toBe(3.837)
+  })
+  it('parses hour timestamps ms-exact', () => {
+    expect(parseTimestamp('01:02:03.837')).toBe(3723.837)
+    expect(parseTimestamp('10:59:59.999')).toBe(39599.999)
+    expect(parseTimestamp('99:59:59.999')).toBe(359999.999)
+  })
+  it('mm:ss.ttt without hours is ms-exact', () => {
+    expect(parseTimestamp('00:03.837')).toBe(3.837)
+    expect(parseTimestamp('59:59,999')).toBe(3599.999)
+  })
+  it('every millisecond parses to ms / 1000 exactly, with and without hours', () => {
+    const bad: string[] = []
+    const check = (ms: number) => {
+      for (const hours of [true, false]) {
+        if (!hours && ms >= 3_600_000) continue
+        const got = parseTimestamp(fmt(ms, hours))
+        if (got !== ms / 1000) bad.push(`${fmt(ms, hours)} → ${got}`)
+      }
+    }
+    for (let ms = 0; ms <= 10_000; ms++) check(ms)
+    for (const h of [1, 2, 10, 23, 99]) for (let ms = 0; ms < 2000; ms++) check(h * 3_600_000 + 1_234_000 + ms)
+    expect(bad).toEqual([])
+  })
+  it('formatTimestamp(ms / 1000) prints the same millisecond (no .1000 carry)', () => {
+    const bad: string[] = []
+    for (let ms = 0; ms <= 10_000; ms++) if (formatTimestamp(ms / 1000) !== fmt(ms)) bad.push(fmt(ms))
+    expect(bad).toEqual([])
+    expect(formatTimestamp(1.9996)).toBe('00:00:02.000')
   })
 })
 
@@ -34,6 +75,30 @@ describe('parseVtt', () => {
   })
   it('extends too-short cues to the minimum duration without overlapping the next', () => {
     expect(cues[2]!.end - cues[2]!.start).toBeCloseTo(0.833, 3)
+    expect([cues[2]!.start, cues[2]!.end]).toEqual([5, 5.833])
+  })
+  it('cue start/end are ms-exact, including minDuration-extended ends (KIT-030)', () => {
+    const c = parseVtt('WEBVTT\n\n00:00:03.837 --> 00:00:03.900\nShort\n\n01:00:00.001 --> 01:00:04.837\nLong', { trackId: 't' })
+    expect([c[0]!.start, c[0]!.end]).toEqual([3.837, 4.67])
+    expect([c[1]!.start, c[1]!.end]).toEqual([3600.001, 3604.837])
+    const bad: string[] = []
+    for (let ms = 0; ms <= 10_000; ms += 7) {
+      const [x] = parseVtt(`WEBVTT\n\n${fmt(ms)} --> ${fmt(ms + 1)}\nX`, { trackId: 't' })
+      if (x!.start !== ms / 1000 || x!.end !== (ms + 833) / 1000) bad.push(`${fmt(ms)}: ${x!.start} ${x!.end}`)
+    }
+    expect(bad).toEqual([])
+  })
+  it('merges a gap below mergeGap and never one of exactly mergeGap, by whole milliseconds', () => {
+    const bad: string[] = []
+    for (let ms = 1000; ms <= 10_000; ms += 3) {
+      for (const gap of [39, 40]) {
+        const v = `WEBVTT\n\n${fmt(ms - 1000)} --> ${fmt(ms)}\nA\n\n${fmt(ms + gap)} --> ${fmt(ms + 2000)}\nB`
+        const [a] = parseVtt(v, { trackId: 't' })
+        const want = gap < 40 ? (ms + gap) / 1000 : ms / 1000
+        if (a!.end !== want) bad.push(`end ${fmt(ms)} gap ${gap}: ${a!.end}`)
+      }
+    }
+    expect(bad).toEqual([])
     expect(cues[1]!.end).toBeLessThanOrEqual(cues[2]!.start)
   })
   it('merges one-frame gaps', () => {
@@ -120,7 +185,7 @@ describe('joinVttSegments', () => {
     expect(out).toBe(`WEBVTT\n\n${first}\n`)
     const cues = parseVtt(out, { trackId: 't' })
     expect(cues).toHaveLength(1)
-    expect(cues[0]!.start).toBeCloseTo(3.837, 6) // parseTimestamp yields 3.8369999999999997 until KIT-030
+    expect(cues[0]!.start).toBe(3.837)
     expect([cues[0]!.end, cues[0]!.text]).toEqual([7.3, 'Journal'])
   })
 
