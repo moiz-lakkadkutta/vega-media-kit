@@ -36,6 +36,8 @@ export const FireOsAdapter = forwardRef<KitPlayerRef, AdapterProps>(function Fir
   const videoRef = useRef<{ seek(s: number): void } | null>(null)
   const [paused, setPaused] = useState(!props.autoplay)
   const [rate, setRate] = useState(1)
+  /** react-native-video's `volume` prop (1.0 is its default). State, not a key: changing it never re-mounts <Video>. */
+  const [volume, setVolume] = useState(1)
   const [audioIndex, setAudioIndex] = useState<number | undefined>()
   const position = useRef(props.startAt ?? 0)
   const load = useRef<Load>(newLoad(props.source.uri))
@@ -57,6 +59,7 @@ export const FireOsAdapter = forwardRef<KitPlayerRef, AdapterProps>(function Fir
     pause: () => setPaused(true),
     seek: (s) => videoRef.current?.seek(s),
     setRate: (r) => setRate(r),
+    setVolume: (v) => setVolume(v),
     selectAudio: (id) => {
       setAudioIndex(Number(id))
       // ExoPlayer publishes no track event after a switch, so the adapter's own view marks the pick (KIT-029).
@@ -134,6 +137,8 @@ export const FireOsAdapter = forwardRef<KitPlayerRef, AdapterProps>(function Fir
       source={{ uri: props.source.uri, type: props.source.type === 'hls' ? 'm3u8' : 'mpd', headers: props.source.headers }}
       paused={paused}
       rate={rate}
+      // https://docs.thewidlarzgroup.com/react-native-video/docs/v6/component/props/#volume — 0.0 mutes, 1.0 full.
+      volume={volume}
       style={props.style ?? { flex: 1 }}
       resizeMode="contain"
       selectedAudioTrack={audioIndex !== undefined ? { type: 'index', value: audioIndex } : undefined}

@@ -2,6 +2,7 @@ import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react
 import { fromShakaText, fromShakaVariants } from '../../core'
 import type { Cue, Tracks } from '../../core'
 import type { AdapterProps, KitPlayerRef } from '../types'
+import { VEGA_DOCS, warnOnce } from '../../platform/log'
 
 /**
  * Vega adapter over @amazon-devices/react-native-w3cmedia with Shaka Player as the MSE engine.
@@ -59,6 +60,7 @@ export const VegaAdapter = forwardRef<KitPlayerRef, AdapterProps>(function VegaA
     pause: () => media.current?.pause(),
     seek: (s) => { if (media.current) media.current.currentTime = s },
     setRate: (r) => { if (media.current) media.current.playbackRate = r },
+    setVolume: setVolumeUnsupported,
     selectAudio: (id) => {
       const p = player.current
       if (!p) return
@@ -87,6 +89,15 @@ export const VegaAdapter = forwardRef<KitPlayerRef, AdapterProps>(function VegaA
 
   return <w3c.VideoPlayer ref={media} style={props.style ?? { flex: 1 }} testID={props.testID} />
 })
+
+/**
+ * `KitPlayerRef.setVolume` on Vega: a no-op that says so once (KIT-018 convention). Vega is experimental and not
+ * device-verified (decision 0001); whether the w3cmedia element honours `volume` is unconfirmed, so the kit does
+ * not pretend. Never throws. Exported so it can be tested without rendering the adapter.
+ */
+export function setVolumeUnsupported(_volume: number): void {
+  warnOnce('KitPlayerRef.setVolume', 'kepler', VEGA_DOCS, 'Vega support is experimental, not device-verified (w3cmedia volume unconfirmed)')
+}
 
 /** Shaka text displayer that swallows rendering (the kit's CueOverlay draws). */
 class NullTextDisplayer {
