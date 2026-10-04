@@ -53,6 +53,11 @@ If a selected text track cannot be loaded (HTTP error, a body that is neither We
 failure), the kit reports a non-fatal `TEXT_FETCH` through `onError` for that track; other selected tracks still
 load.
 
+On web, if the `<video>` element cannot load or decode the source, the kit reports a **fatal** `MEDIA` error
+through `onError` (`cause` is the browser's `MediaError`) and then `onState('error')`; no `ready` follows. If the
+browser refuses `play()` — normally its autoplay policy — the kit reports a **non-fatal** `PLAY_REJECTED`: playback
+stays paused and the load still reports `ready`, so show a play button and call `ref.play()` from it.
+
 ### Deprecated: `source.headers['x-kit-text-urls']`
 
 Before the kit parsed master playlists, apps passed a JSON id→url map in `source.headers['x-kit-text-urls']`.

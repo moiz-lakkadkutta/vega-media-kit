@@ -513,3 +513,92 @@ describe('KitPlayer onError origin gate and selectText safety net (KIT-016)', ()
     expect(onError.mock.calls).toEqual([[ERR]])
   })
 })
+
+describe('KitPlayer latest-props callbacks and the origin gates (KIT-025)', () => {
+  /** KitPlayer with per-render (inline) app callbacks, as an app that writes `onState={(s) => …}` passes them. */
+  function renderInline(uri: string, cbs: Pick<KitPlayerProps, 'onState' | 'onPosition' | 'onTracks'>) {
+    act(() =>
+      root.render(
+        <KitPlayer ref={setApi} source={{ uri, type: 'hls' }} preferredText={PREF_EMPTY} onError={onError} renderControls={renderControls} {...cbs} />,
+      ),
+    )
+  }
+
+  it('a state handler captured before a same-source re-render delivers to the latest app onState', () => {
+    const first = vi.fn<(s: PlayerState) => void>()
+    const second = vi.fn<(s: PlayerState) => void>()
+    renderInline('A', { onState: (s) => first(s) })
+    const report = latest.props!.onState // as the web adapter's per-load listener holds it
+    renderInline('A', { onState: (s) => second(s) })
+    act(() => report?.('paused'))
+
+    expect(first).not.toHaveBeenCalled()
+    expect(second.mock.calls).toEqual([['paused']])
+    expect(ctx.state).toBe('paused')
+  })
+
+  it('a position handler captured before a re-render delivers to the latest app onPosition', () => {
+    const first = vi.fn<(s: number) => void>()
+    const second = vi.fn<(s: number) => void>()
+    renderInline('A', { onPosition: (s) => first(s) })
+    const report = latest.props!.onPosition
+    renderInline('A', { onPosition: (s) => second(s) })
+    act(() => report?.(3))
+
+    expect(first).not.toHaveBeenCalled()
+    expect(second.mock.calls).toEqual([[3]])
+  })
+
+  it('the same captured state handler is still refused after a source switch: the ref does not bypass the gate', () => {
+    const first = vi.fn<(s: PlayerState) => void>()
+    const second = vi.fn<(s: PlayerState) => void>()
+    const third = vi.fn<(s: PlayerState) => void>()
+    renderInline('A', { onState: (s) => first(s) })
+    const reportA = latest.props!.onState
+    renderInline('A', { onState: (s) => second(s) })
+    renderInline('B', { onState: (s) => third(s) })
+    act(() => reportA?.('paused'))
+
+    expect(first).not.toHaveBeenCalled()
+    expect(second).not.toHaveBeenCalled()
+    expect(third).not.toHaveBeenCalled()
+    expect(ctx.state).toBe('idle')
+
+    // B's own handler is accepted: catches a gate that drops everything.
+    act(() => latest.props!.onState?.('paused'))
+    expect(third.mock.calls).toEqual([['paused']])
+  })
+
+  it('the state, tracks and position handlers keep their identity across a same-source re-render with new inline callbacks', () => {
+    renderInline('A', { onState: () => {}, onPosition: () => {}, onTracks: () => {} })
+    const before = { s: latest.props!.onState, p: latest.props!.onPosition, t: latest.props!.onTracks, e: latest.props!.onError }
+    renderInline('A', { onState: () => {}, onPosition: () => {}, onTracks: () => {} })
+    const after = { s: latest.props!.onState, p: latest.props!.onPosition, t: latest.props!.onTracks, e: latest.props!.onError }
+
+    expect(after.s).toBe(before.s)
+    expect(after.p).toBe(before.p)
+    expect(after.t).toBe(before.t)
+    expect(after.e).toBe(before.e)
+    // …and change on a source switch (the per-uri gates), except position, which has no gate.
+    renderInline('B', { onState: () => {}, onPosition: () => {}, onTracks: () => {} })
+    expect(latest.props!.onState).not.toBe(before.s)
+    expect(latest.props!.onTracks).not.toBe(before.t)
+    expect(latest.props!.onPosition).toBe(before.p)
+  })
+
+  it("ready is dropped after the live load reported error; the next source's ready is reported", () => {
+    render('A')
+    const loadA = beginLoad()
+    act(() => latest.props!.onState?.('error'))
+    loadA.complete(TRACKS_A)
+
+    expect(onState.mock.calls).toEqual([['error']])
+    expect(ctx.state).toBe('error')
+    expect(onTracks.mock.calls).toEqual([[TRACKS_A]]) // the tracks are true; only `ready` is dropped
+
+    render('B')
+    beginLoad().complete(TRACKS_B)
+    expect(onState.mock.calls).toEqual([['error'], ['ready']])
+    expect(ctx.state).toBe('ready')
+  })
+})

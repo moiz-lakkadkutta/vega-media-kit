@@ -18,6 +18,10 @@ import { cueIds, deferred, events, metadataLoaded, routeStream } from './helpers
  * only when `kinds` names it; `selectText` with its id still delivers it.
  * Specs 30–33 (KIT-016): text-load failures reach `onError` as `TEXT_FETCH` without a fetch storm; a superseded
  * source's failure does not.
+ * Specs 34–42 (KIT-025): a media failure reaches `onError` as one fatal `MEDIA` and the state becomes `error` (34–36);
+ * an interrupted `play()` is never an unhandled rejection (37–38); `playing` is reported when the element is playing,
+ * not when `play()` was called, so an autoplay load can report `ready` first (39–40); inline `onState`/`onPosition`
+ * reach the latest callbacks (41); an autoplay the browser refuses is one non-fatal `PLAY_REJECTED` (42).
  */
 const BASE = 'http://localhost:4173'
 const trackEvents = (page: Page) => events(page).then((e) => e.filter((x) => x.type === 'tracks'))
@@ -268,7 +272,7 @@ test('after two source switches each load reports loading and ready once and eac
     return { tu: (window as unknown as { __tu: number }).__tu, ticks: window.__kit.positionTicks }
   })
   expect(ticks).toBe(tu) // one onPosition per timeupdate, not three
-  // `playing` fires once per play() too — a leaked `play` listener would report it once per past load.
+  // `playing` fires once per play() too — a leaked `playing` listener would report it once per past load.
   expect(await stateEvents(page, 'playing')).toBe(1)
 })
 
@@ -492,4 +496,120 @@ test("a subtitle fetch that fails after a source switch does not reach onError f
   await expect.poll(() => errorEvents(page)).toEqual([expect.objectContaining({ ...TEXT_FETCH, message: 'Could not load text track 1' })])
   await page.waitForTimeout(300)
   expect(await errorEvents(page)).toHaveLength(1)
+})
+
+// ---- KIT-025: media errors, play() rejections, `playing` vs `play`, stale callbacks ------------------------------
+
+const MEDIA = { type: 'error', code: 'MEDIA', fatal: true }
+const states = (page: Page) => events(page).then((e) => e.flatMap((x) => (x.type === 'state' ? [x.state] : [])))
+const unhandled = (page: Page) => page.evaluate(() => window.__kit.unhandled)
+
+test('a media URL answering 404 reaches onError as one fatal MEDIA and the state becomes error; no tracks, no ready (KIT-025)', async ({ page }) => {
+  await routeStream(page, { mediaRespond: { master: { status: 404, body: 'Not Found' } } })
+  await page.goto('/player.html')
+  await expect.poll(() => errorEvents(page)).toEqual([expect.objectContaining(MEDIA)])
+  await page.waitForTimeout(500) // the manifest is real and fast: a join that completed would have published by now
+  expect(await errorEvents(page)).toHaveLength(1) // no HLS_MASTER either: the manifest is fine
+  expect(await states(page)).toEqual(['loading', 'error'])
+  expect(await trackEvents(page)).toEqual([])
+  expect(await page.evaluate(() => window.__kit.state())).toBe('error')
+})
+
+test('a 200 media body that is not media reaches onError as one fatal MEDIA (KIT-025)', async ({ page }) => {
+  await routeStream(page, { mediaRespond: { master: { status: 200, body: 'not a video', contentType: 'video/webm' } } })
+  await page.goto('/player.html')
+  await expect.poll(() => errorEvents(page)).toEqual([expect.objectContaining(MEDIA)])
+  await page.waitForTimeout(300)
+  expect(await errorEvents(page)).toHaveLength(1)
+  expect(await page.evaluate(() => window.__kit.state())).toBe('error')
+})
+
+test('a broken source followed by a switch: the new source reports loading, tracks and ready and no further error (KIT-025)', async ({ page }) => {
+  await routeStream(page, { mediaRespond: { master: { status: 404, body: 'Not Found' } } })
+  await page.goto('/player.html')
+  await expect.poll(() => page.evaluate(() => window.__kit.state())).toBe('error')
+  const n = (await events(page)).length
+  await setSource(page, '/stream/master-b')
+  await expect.poll(() => page.evaluate(() => window.__kit.state())).toBe('ready')
+  await page.waitForTimeout(300)
+  const after = (await events(page)).slice(n)
+  expect(after.map((x) => (x.type === 'state' ? `state:${x.state}` : x.type))).toEqual(['state:loading', 'tracks', 'state:ready'])
+  expect(await errorEvents(page)).toHaveLength(1) // A's only
+})
+
+test('an autoplay load interrupted by a source switch leaves no unhandled rejection and reports no error (KIT-025)', async ({ page }) => {
+  const a = deferred() // never released: A's media stays in flight until the switch aborts it
+  const hits = await routeStream(page, { mediaHold: { master: a.promise } })
+  await page.goto('/player.html?autoplay=1')
+  await expect.poll(() => hits).toContain('media master')
+  expect(await page.getByTestId('kit-video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(false) // play() is pending
+  await setSource(page, '/stream/master-b')
+  await expect.poll(() => hasState(page, 'playing'), { timeout: 5_000 }).toBe(true) // positive control: B autoplays
+  await page.waitForTimeout(300)
+  expect(await unhandled(page)).toEqual([])
+  expect(await errorEvents(page)).toEqual([])
+})
+
+test('ref.play() then ref.pause() in one task leaves no unhandled rejection (KIT-025)', async ({ page }) => {
+  // The media is held so play() is still pending when pause() runs: with data already in, the spec's "notify about
+  // playing" takes the pending promise synchronously and pause() has nothing to reject — the spec would be vacuous.
+  const md = deferred()
+  const hits = await routeStream(page, { media: md.promise })
+  await page.goto('/player.html')
+  await expect.poll(() => hits).toContain('media master')
+  await page.evaluate(() => {
+    document.querySelector('video')!.muted = true
+    window.__kit.ref!.play()
+    window.__kit.ref!.pause()
+  })
+  await page.waitForTimeout(300)
+  expect(await unhandled(page)).toEqual([])
+  expect(await errorEvents(page)).toEqual([])
+  expect(await stateEvents(page, 'playing')).toBe(0)
+})
+
+test("an autoplay load reports no 'playing' until the element is playing: with the media held it is not playing, released it is (KIT-025)", async ({ page }) => {
+  const md = deferred()
+  const hits = await routeStream(page, { media: md.promise })
+  await page.goto('/player.html?autoplay=1')
+  await expect.poll(() => hits).toContain('media master')
+  await page.waitForTimeout(300)
+  expect(await page.getByTestId('kit-video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(false) // play() was called
+  expect((await states(page)).every((s) => s === 'loading' || s === 'buffering')).toBe(true)
+  md.resolve()
+  await expect.poll(() => hasState(page, 'playing'), { timeout: 5_000 }).toBe(true)
+  expect(await page.getByTestId('kit-video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(false)
+})
+
+test('an autoplay load whose manifest is already in reports ready before playing (KIT-025 × 0008)', async ({ page }) => {
+  const md = deferred()
+  const hits = await routeStream(page, { media: md.promise })
+  const manifest = page
+    .waitForResponse((r) => new URL(r.url()).pathname === '/stream/master' && r.request().resourceType() === 'fetch')
+    .then((r) => r.finished())
+  await page.goto('/player.html?autoplay=1')
+  await manifest
+  await expect.poll(() => hits).toContain('media master')
+  md.resolve()
+  await expect.poll(() => hasState(page, 'playing'), { timeout: 5_000 }).toBe(true)
+  expect((await states(page)).filter((s) => s !== 'buffering')).toEqual(['loading', 'ready', 'playing'])
+  await expectTracksBeforeReady(page)
+})
+
+test('inline onState/onPosition: after re-renders the next state and position reach the latest callbacks (KIT-025)', async ({ page }) => {
+  await routeStream(page)
+  await page.goto('/player.html?inlineCallbacks=1')
+  await waitForTracks(page)
+  await page.evaluate(() => {
+    window.__kit.rerender()
+    window.__kit.rerender()
+    window.__kit.rerender()
+  })
+  const gen = await page.evaluate(() => window.__kit.gen())
+  expect(gen).toBeGreaterThanOrEqual(4)
+  await page.evaluate(() => window.__kit.play())
+  await expect.poll(() => hasState(page, 'playing'), { timeout: 5_000 }).toBe(true)
+  await expect.poll(() => page.evaluate(() => window.__kit.positionTicks), { timeout: 5_000 }).toBeGreaterThanOrEqual(1)
+  expect(await page.evaluate(() => window.__kit.gen())).toBe(gen) // nothing re-rendered App meanwhile
+  expect(await page.evaluate(() => window.__kit.calledGen)).toEqual({ state: gen, position: gen })
 })

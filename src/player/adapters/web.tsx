@@ -1,7 +1,58 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
-import type { TextTrack, Tracks } from '../../core'
+import type { PlayerError, TextTrack, Tracks } from '../../core'
 import type { AdapterProps, KitPlayerRef } from '../types'
 import { deprecatedTextUrls, fetchHlsVtt, loadHlsTextTracks } from '../hls'
+
+/** `MediaError.code` → message. Codes per https://html.spec.whatwg.org/multipage/media.html#mediaerror */
+const MEDIA_MESSAGES: Record<number, string> = {
+  1: 'Media loading was aborted', // MEDIA_ERR_ABORTED
+  2: 'A network error stopped the media download', // MEDIA_ERR_NETWORK
+  3: 'The media could not be decoded', // MEDIA_ERR_DECODE
+  4: 'The media source is not supported or could not be loaded', // MEDIA_ERR_SRC_NOT_SUPPORTED (Chromium: also a 404)
+}
+
+/**
+ * The kit error for the element's current `MediaError`, or `null` when there is none (a spurious `error` event).
+ * Always fatal: after an element error the HTML load algorithm stops the resource. One code, `MEDIA`; the
+ * `MediaError` (its `code` and the browser's `message` detail) is the `cause` (KIT-025).
+ */
+export function mediaElementError(err: Pick<MediaError, 'code' | 'message'> | null): PlayerError | null {
+  if (!err) return null
+  return { code: 'MEDIA', fatal: true, message: MEDIA_MESSAGES[err.code] ?? 'Playback error', cause: err }
+}
+
+/**
+ * How a `play()` rejection is reported; `null` = swallow. `AbortError` (a load or `pause()` interrupted the play —
+ * the intended outcome) and `NotSupportedError` (always accompanied by the element `error` event, reported as `MEDIA`)
+ * are swallowed; everything else is a non-fatal `PLAY_REJECTED`. The spec's `play()` rejects only with these three
+ * (https://html.spec.whatwg.org/multipage/media.html#dom-media-play); "anything else" is defensive.
+ */
+export function playRejection(e: unknown): PlayerError | null {
+  const name = (e as { name?: unknown } | null | undefined)?.name // a DOMException in browsers, a plain Error in tests
+  if (name === 'AbortError' || name === 'NotSupportedError') return null
+  if (name === 'NotAllowedError') {
+    return { code: 'PLAY_REJECTED', fatal: false, message: 'Playback was blocked by the browser (autoplay policy)', cause: e }
+  }
+  return { code: 'PLAY_REJECTED', fatal: false, message: 'Playback could not start', cause: e }
+}
+
+/**
+ * `v.play()`, with its rejection classified by `playRejection` and reported — never an unhandled rejection, even
+ * when `report` throws (an app `onError` that throws). Tolerates a non-promise return (legacy engines, jsdom).
+ */
+function startPlay(v: HTMLVideoElement, report: (e: PlayerError) => void): void {
+  const pending: unknown = v.play()
+  if (!pending || typeof (pending as PromiseLike<unknown>).then !== 'function') return
+  ;(pending as PromiseLike<unknown>).then(undefined, (reason: unknown) => {
+    const e = playRejection(reason)
+    if (!e) return
+    try {
+      report(e)
+    } catch {
+      // nothing left to report to
+    }
+  })
+}
 
 /**
  * Web adapter: HTMLVideoElement (+ Shaka when available) for the Playwright harness and Storybook.
@@ -46,17 +97,31 @@ export const WebAdapter = forwardRef<KitPlayerRef, AdapterProps>(function WebAda
       props.onTracks?.(tracks.current)
       props.onState?.('ready') // from the join, after onTracks: the contract in AdapterProps (KIT-015)
     })
+    // `playing`, not `play`: `play` fires as soon as play() is called, before any data, so an autoplay load would
+    // report `playing` first and its `ready` would always be dropped (0008). `waiting` is `buffering` only while
+    // playing: Chromium fires it during a seek while paused too, and no `playing` would ever leave that state.
+    // `error` reports through this load's `onError` (KIT-016 boundary: the kit's per-uri gate attributes it), first
+    // the fatal MEDIA, then the `error` state, so an app rendering on `state === 'error'` already holds the error.
     const listeners: [keyof HTMLVideoElementEventMap, () => void][] = [
       ['loadedmetadata', metadataSeen],
       ['timeupdate', () => props.onPosition?.(v.currentTime)],
-      ['play', () => props.onState?.('playing')],
+      ['playing', () => props.onState?.('playing')],
+      ['waiting', () => { if (!v.paused) props.onState?.('buffering') }],
       ['pause', () => props.onState?.('paused')],
       ['ended', () => props.onState?.('ended')],
+      ['error', () => {
+        const e = mediaElementError(v.error)
+        if (!e) return
+        props.onError?.(e)
+        props.onState?.('error')
+      }],
     ]
     for (const [type, fn] of listeners) v.addEventListener(type, fn)
     v.src = props.source.uri
     if (props.startAt) v.currentTime = props.startAt
-    if (props.autoplay) void v.play()
+    // A rejection after this load was superseded is dropped here (0005 §3: adapters cancel their own reports) and
+    // again by the kit's gate on this load's `onError`.
+    if (props.autoplay) startPlay(v, (e) => { if (!cancelled) props.onError?.(e) })
     return () => {
       cancelled = true
       for (const [type, fn] of listeners) v.removeEventListener(type, fn)
@@ -64,7 +129,8 @@ export const WebAdapter = forwardRef<KitPlayerRef, AdapterProps>(function WebAda
   }, [props.source.uri]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useImperativeHandle(ref, () => ({
-    play: () => void el.current?.play(),
+    // This render's `onError`: the handler of the source live when play() was called, like `selectText` below.
+    play: () => { const v = el.current; if (v) startPlay(v, (e) => props.onError?.(e)) },
     pause: () => el.current?.pause(),
     seek: (s) => { if (el.current) el.current.currentTime = s },
     setRate: (r) => { if (el.current) el.current.playbackRate = r },

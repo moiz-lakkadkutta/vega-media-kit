@@ -25,11 +25,13 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
   const selectedText = useRef<Set<string>>(new Set())
   const appliedPrefs = useRef(false)
   /**
-   * Whether the live load has reported `playing` (or `ended`). A `ready` that arrives afterwards is dropped:
-   * `ready` means "loaded, not yet playing" and must never overwrite a later state (docs/decisions/0008). Fire OS
-   * reads the master playlist after ExoPlayer has already started (KIT-028); web waits for the manifest too.
+   * Whether the live load has reported `playing`, `ended` or `error`. A `ready` that arrives afterwards is dropped:
+   * `ready` means "loaded, not yet playing" and must never overwrite a later state (docs/decisions/0008) — and a
+   * load that failed is neither (KIT-025). Fire OS reads the master playlist after ExoPlayer has already started
+   * (KIT-028); web waits for the manifest too, and its join still completes after a media error that followed
+   * `loadedmetadata`.
    */
-  const playbackBegan = useRef(false)
+  const readyClosed = useRef(false)
   /** The source the kit's per-source state (selection, latch, scheduler tracks) currently belongs to. */
   const liveUri = useRef(props.source.uri)
   const sourceUri = props.source.uri
@@ -44,6 +46,18 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
   onCueRef.current = props.onCue
   const onErrorRef = useRef(props.onError)
   onErrorRef.current = props.onError
+  // KIT-025: the app's onState / onPosition / onTracks and the track preferences are read through refs too, so the
+  // handlers below change identity only on `sourceUri` (the gates) and an adapter's per-load listener — which holds
+  // the handler of the render its load began in — never delivers to a stale inline callback. The gates are
+  // unchanged: a report through a superseded handler is still dropped before any of these refs is read.
+  const onStateRef = useRef(props.onState)
+  onStateRef.current = props.onState
+  const onPositionRef = useRef(props.onPosition)
+  onPositionRef.current = props.onPosition
+  const onTracksRef = useRef(props.onTracks)
+  onTracksRef.current = props.onTracks
+  const prefsRef = useRef({ audio: props.preferredAudio, text: props.preferredText })
+  prefsRef.current = { audio: props.preferredAudio, text: props.preferredText }
   const positionRef = useRef(0)
   const tracksRef = useRef<Tracks>({ audio: [], text: [] })
   // Lazy `useRef` rather than `useMemo(..., [])`: React documents `useMemo` as a cache it may discard, and a
@@ -116,29 +130,30 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
       if (sourceUri !== liveUri.current) return // a report for a source that is no longer live
       tracksRef.current = t
       setTracks(t)
-      props.onTracks?.(t)
+      onTracksRef.current?.(t)
       if (!appliedPrefs.current && adapterRef.current) {
         appliedPrefs.current = true
-        const a = pickAudio(t.audio, props.preferredAudio)
+        // The preferences current when the tracks arrive, not when the load began (KIT-025).
+        const a = pickAudio(t.audio, prefsRef.current.audio)
         if (a) adapterRef.current.selectAudio(a.id)
         // No `preferredText` — or an empty one — means text off, never "every track": TV convention is captions
         // off until asked for, and description text is opt-in (decisions 0003, 0007). The decision itself lives
         // in `autoSelectedTextIds` so it is tested in one place.
-        const tx = autoSelectedTextIds(t.text, props.preferredText)
+        const tx = autoSelectedTextIds(t.text, prefsRef.current.text)
         if (tx.length) selectText(tx)
       }
     },
-    [props.onTracks, props.preferredAudio, props.preferredText, selectText, sourceUri],
+    [selectText, sourceUri],
   )
 
   const handlePosition = useCallback(
     (s: number) => {
       positionRef.current = s
       setPosition(s)
-      props.onPosition?.(s)
+      onPositionRef.current?.(s)
       scheduler.update(s)
     },
-    [props.onPosition, scheduler],
+    [scheduler],
   )
 
   /**
@@ -146,18 +161,19 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
    * handler created for a source that is no longer live is dropped — adapters report state through per-load
    * closures (web listeners, the Vega load) or latest-props handlers (Fire OS), so only a superseded load's report
    * can arrive stale. `ready` is dropped once the live load has reported `playing`/`ended`: the adapter could not
-   * order it earlier without reporting `ready` before `onTracks`. The kit never synthesises a state (0005 §3); it
-   * only refuses one.
+   * order it earlier without reporting `ready` before `onTracks`; and once it has reported `error` (KIT-025). The
+   * kit never synthesises a state (0005 §3); it only refuses one. Delivery is through `onStateRef`, so an inline
+   * `onState` is never stale and never re-creates this handler.
    */
   const handleState = useCallback(
     (s: PlayerState) => {
       if (sourceUri !== liveUri.current) return // a report for a source that is no longer live
-      if (s === 'ready' && playbackBegan.current) return // ready never overwrites playing (KIT-028)
-      if (s === 'playing' || s === 'ended') playbackBegan.current = true
+      if (s === 'ready' && readyClosed.current) return // ready never overwrites playing/ended (KIT-028) or error (KIT-025)
+      if (s === 'playing' || s === 'ended' || s === 'error') readyClosed.current = true
       setState(s)
-      props.onState?.(s)
+      onStateRef.current?.(s)
     },
-    [props.onState, sourceUri],
+    [sourceUri],
   )
 
   /**
@@ -196,7 +212,7 @@ export const KitPlayer = forwardRef<KitPlayerRef, KitPlayerProps>(function KitPl
     const start = props.startAt ?? 0
     selectedText.current = applyTextSelection([], scheduler.tracks).selected // refuse VTT first
     appliedPrefs.current = false // the new source's first onTracks re-applies preferredAudio/preferredText
-    playbackBegan.current = false // the new load's ready is reported unless it, too, is already playing
+    readyClosed.current = false // the new load's ready is reported unless it, too, is already playing (or failed)
     for (const t of scheduler.tracks) scheduler.removeTrack(t) // the getter copies, so removing while iterating is safe
     scheduler.update(start) // removeTrack never notifies; this emits onCue([]) iff cues were on screen
     setTracks({ audio: [], text: [] }) // renderControls must not show the previous source's tracks

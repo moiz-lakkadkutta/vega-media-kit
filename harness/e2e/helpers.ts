@@ -28,6 +28,8 @@ export function deferred() {
  *
  * `respond` (KIT-016) replaces the fixture for a relative path with a status/body of the spec's choosing, or
  * `'abort'` (a network failure). It is applied after the `hold` gate, so a spec can hold a request and then fail it.
+ * `mediaRespond` (KIT-025) does the same for the media half of a `master*` path, after the `media` gate and the
+ * per-path `mediaHold` gate.
  */
 export type RouteOverride = { status: number; body?: string; contentType?: string } | 'abort'
 export async function routeStream(
@@ -37,6 +39,10 @@ export async function routeStream(
     media?: Promise<void>
     hold?: Record<string, Promise<void>>
     respond?: Record<string, RouteOverride>
+    /** KIT-025: per `master*` path, holds the `<video>` element's media request (`media` holds every one). */
+    mediaHold?: Record<string, Promise<void>>
+    /** KIT-025: per `master*` path, replaces the `<video>` element's media response (the manifest stays real). */
+    mediaRespond?: Record<string, RouteOverride>
   } = {},
 ) {
   const hits: string[] = []
@@ -50,6 +56,12 @@ export async function routeStream(
     // cues across segment boundaries (KIT-026). `master-d` adds an audio-description rendition (KIT-014).
     if (/^master(-[bcd])?(\.m3u8)?$/.test(rel) && req.resourceType() === 'media') {
       await gates.media
+      await gates.mediaHold?.[rel]
+      const o = gates.mediaRespond?.[rel]
+      if (o === 'abort') return route.abort('failed')
+      if (o) {
+        return route.fulfill({ status: o.status, body: o.body ?? '', contentType: o.contentType ?? 'text/plain' })
+      }
       // Chromium marks a media resource seekable only when the server honours Range (Accept-Ranges + 206);
       // a bare 200 loads but clamps every seek to 0 (probe, §10 step 1). Chromium sends `Range: bytes=0-`.
       const body = readFileSync(FIX('black-15s.webm'))

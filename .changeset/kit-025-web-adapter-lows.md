@@ -1,0 +1,5 @@
+---
+'@moizp/vega-media-kit': minor
+---
+
+**Web: media failures reach `onError`, and state follows the element.** When the `<video>` element cannot load or decode the source, the web adapter now reports a fatal `{ code: 'MEDIA', … , cause: MediaError }` through `onError` and then `onState('error')` — previously the failure was invisible and the state stayed `loading`. `ready` is not reported after `error`. A `play()` the browser refuses (normally its autoplay policy) is reported as a non-fatal `PLAY_REJECTED`; a `play()` interrupted by a source switch or `pause()` is no longer an unhandled `AbortError`. Web now reports `playing` when the element is actually playing (previously as soon as `play()` was called, before any data) and `buffering` while it waits for data during playback, so an autoplay load can report `ready` before `playing` (decision 0008). **All platforms:** an inline `onState`, `onPosition` or `onTracks` callback (a new function every render) is no longer stale — the latest one is always called, and `preferredAudio`/`preferredText` are read when the tracks arrive. No type changes; multi-track text selection is unchanged.

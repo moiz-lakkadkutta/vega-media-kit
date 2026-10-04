@@ -28,7 +28,7 @@ declare global {
       /** Re-render KitPlayer with a new `source.uri` (same callbacks, same preferredText); synchronous. */
       setSource(uri: string): void
       /** Re-render App (and so KitPlayer) with nothing else changed; synchronous. Under `?inlineCallbacks=1` every
-       *  render hands KitPlayer fresh `onCue`/`onPosition` identities (KIT-012). */
+       *  render hands KitPlayer fresh `onCue`/`onPosition`/`onTracks`/`onState` identities (KIT-012, KIT-025). */
       rerender(): void
       /** Distinct `ctx.ref` objects `renderControls` has been handed so far (KIT-012: must stay 1). */
       refIdentities(): number
@@ -47,6 +47,12 @@ declare global {
       diag: { releasedAt: { videoSrc: string | null } | null; handover: { rendered: string; videoSrc: string | null } | null }
       /** The state KitPlayer last handed to renderControls (spec 26). */
       state(): PlayerState
+      /** `String(reason.name ?? reason)` of every `unhandledrejection` on the page (KIT-025: must stay empty). */
+      unhandled: string[]
+      /** App renders so far — the generation an inline callback was created in (KIT-025, `?inlineCallbacks=1`). */
+      gen(): number
+      /** The generation of the inline arrow that received the latest `onState` / `onPosition` (KIT-025). */
+      calledGen: { state: number | null; position: number | null }
     }
   }
 }
@@ -60,6 +66,8 @@ const primary = q.get('primary') ?? '0'
 // KIT-012: pass `onCue`/`onPosition` as inline arrows (a new identity every render) instead of the module-scope
 // constants below, the way a README-naive app would. The kit must not rebuild its scheduler for that.
 const inlineCallbacks = q.get('inlineCallbacks') === '1'
+// KIT-025: `?autoplay=1` → the `autoplay` prop (the config launches Chromium with a no-gesture autoplay policy).
+const autoplay = q.get('autoplay') === '1'
 // KIT-022 §7.2: `?hold=<encodeURIComponent(pathname)>` — the first `fetch` of that path is made eagerly but handed
 // to the caller only on `releaseHeld()`. Encoded, or routeStream's `**/stream/**` glob swallows the page itself.
 const hold = q.get('hold')
@@ -103,8 +111,15 @@ const kit: Window['__kit'] = {
   },
   diag: { releasedAt: null, handover: null },
   state: () => kitState,
+  unhandled: [],
+  gen: () => gen,
+  calledGen: { state: null, position: null },
 }
 window.__kit = kit
+window.addEventListener('unhandledrejection', (e) => {
+  const r = e.reason as { name?: unknown } | null | undefined
+  kit.unhandled.push(String(r?.name ?? r))
+})
 
 const videoSrc = () => document.querySelector('video')?.getAttribute('src') ?? null
 let renderedUri = src
@@ -138,13 +153,15 @@ const log = (e: Ev) => {
   if (pre) pre.textContent = JSON.stringify(kit.events, null, 1)
 }
 
-// Stable callbacks (module scope) by default; `?inlineCallbacks=1` wraps onCue/onPosition in per-render arrows
-// (specs 19–20) to prove the kit no longer rebuilds its scheduler or its ref for an inline callback (KIT-012).
+// Stable callbacks (module scope) by default; `?inlineCallbacks=1` wraps onCue/onPosition/onTracks/onState in
+// per-render arrows (specs 19–20) to prove the kit no longer rebuilds its scheduler or its ref for an inline callback
+// (KIT-012), and that a report always reaches the latest render's arrow (spec 41, KIT-025).
 let setCuesState: (c: Cue[]) => void = () => {}
 let setSrcState: (uri: string) => void = () => {}
 let setBumpState: (f: (n: number) => number) => void = () => {}
 const refs = new Set<KitPlayerRef>()
 let renders = 0
+let gen = 0
 let kitState: PlayerState = 'idle'
 const onCue = (active: Cue[]) => {
   kit.active = active
@@ -171,6 +188,7 @@ function App() {
   setSrcState = setUri
   setBumpState = setBump
   renderedUri = uri
+  const g = ++gen // this render's generation: the inline arrows below record it when they are called
   // Parent layout effects run after the child's, so this runs inside the switch's commit after KitPlayer's
   // reset and before the adapter's passive effect — unless something flushed that effect already (the pin).
   useLayoutEffect(() => {
@@ -187,10 +205,25 @@ function App() {
         }}
         source={{ uri, type: 'hls', ...(textUrls ? { headers: { 'x-kit-text-urls': textUrls } } : {}) }}
         preferredText={preferred ? JSON.parse(preferred) : undefined}
+        autoplay={autoplay}
         onCue={inlineCallbacks ? (c) => onCue(c) : onCue}
-        onPosition={inlineCallbacks ? (s) => onPosition(s) : onPosition}
-        onTracks={onTracks}
-        onState={onState}
+        onPosition={
+          inlineCallbacks
+            ? (s) => {
+                kit.calledGen.position = g
+                onPosition(s)
+              }
+            : onPosition
+        }
+        onTracks={inlineCallbacks ? (t) => onTracks(t) : onTracks}
+        onState={
+          inlineCallbacks
+            ? (s) => {
+                kit.calledGen.state = g
+                onState(s)
+              }
+            : onState
+        }
         onError={onError}
         renderControls={(ctx) => {
           refs.add(ctx.ref)

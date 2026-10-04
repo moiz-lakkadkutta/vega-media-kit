@@ -46,7 +46,9 @@ export interface KitPlayerProps {
    * `getTracks()` and `selectText` work inside `onState('ready')`; `ready` is not reported for a load that has
    * already reported `playing` or `ended` (an autoplay load whose tracks arrive after playback began goes
    * `loading → … → playing`, with `onTracks` in between), and it never overwrites `playing` in `renderControls`.
-   * States of a source the app has switched away from are not reported (docs/decisions/0008).
+   * States of a source the app has switched away from are not reported (docs/decisions/0008). A load that fails
+   * reports `error` (after `onError`); `ready` is not reported after `error`. Web reports `buffering` while it waits
+   * for data during playback. Always delivered to the latest `onState` prop (as are `onPosition` and `onTracks`).
    */
   onState?(state: PlayerState): void
   onTracks?(tracks: Tracks): void
@@ -56,7 +58,10 @@ export interface KitPlayerProps {
    * Errors, by `code`: `HLS_MASTER` (the master playlist could not be read; non-fatal, playback continues without
    * manifest text tracks), `TEXT_FETCH` (a selected text track could not be loaded — HTTP error, a body that is
    * neither WebVTT nor an HLS media playlist, network failure; non-fatal, one per failed track per `selectText`,
-   * other selected tracks still load), `EXO` (Fire OS playback error, fatal), `SHAKA_<n>` (Vega, fatal). Errors of a
+   * other selected tracks still load), `EXO` (Fire OS playback error, fatal), `SHAKA_<n>` (Vega, fatal), `MEDIA`
+   * (web: the `<video>` element reported a `MediaError` — unreachable, undecodable or unsupported media; fatal, the
+   * state becomes `error`; `cause` is the `MediaError`), `PLAY_REJECTED` (web: `play()` was refused, normally the
+   * browser's autoplay policy; non-fatal, playback stays paused and a later `play()` can start it). Errors of a
    * source the app has switched away from are not reported. Always delivered to the latest `onError` prop.
    */
   onError?(error: PlayerError): void
@@ -82,10 +87,11 @@ export interface KitPlayerProps {
  * would be refused.
  *
  * State contract for one load: report `loading` when the load begins; report `onTracks` exactly once when the track
- * list is complete (docs/decisions/0004) and `ready` immediately after it, from the same continuation — never from
- * a separate event such as `loadedmetadata`. Report `playing` / `paused` / `buffering` / `ended` as the platform
- * does, before or after `ready`. The kit drops a `ready` that arrives after the load reported `playing` or `ended`
- * (Fire OS reads the master playlist after ExoPlayer has started) and drops every state report that arrives through
+ * list is complete (docs/decisions/0004) — none if the load fails first — and `ready` immediately after it, from the
+ * same continuation — never from a separate event such as `loadedmetadata`. Report `playing` / `paused` /
+ * `buffering` / `ended` as the platform does, before or after `ready`. Report `error` after the fatal `onError` of a
+ * failed load. The kit drops a `ready` that arrives after the load reported `playing`, `ended` or `error` (Fire OS
+ * reads the master playlist after ExoPlayer has started) and drops every state report that arrives through
  * an `onState` created for a source that is no longer live — so hold `onState` the same way as `onTracks`
  * (docs/decisions/0008; KIT-015, KIT-028).
  */
