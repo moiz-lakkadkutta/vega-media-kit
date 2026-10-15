@@ -4,7 +4,7 @@
  * replaced: react-native-video is a component that records its props so the test can fire `onLoadStart` /
  * `onLoad` / `onError` in chosen orders, and `fetch` is a stub that holds every request until the test releases it.
  */
-import { act, useEffect } from 'react'
+import { act, useEffect, useImperativeHandle, type Ref } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Cue, PlayerError, PlayerState, Tracks } from '../src/core'
 import type { KitPlayerRef } from '../src/player/types'
@@ -14,6 +14,10 @@ const rig = vi.hoisted(() => ({
   props: null as Record<string, any> | null,
   mounts: 0,
   unmounts: 0,
+  /** Every render's `source.uri` / `source.startPosition` (KIT-041). */
+  sources: [] as { uri: string; startPosition: unknown }[],
+  /** react-native-video's imperative `seek`, as reached through the adapter's `videoRef` (KIT-041). */
+  seek: null as unknown as ReturnType<typeof vi.fn>,
 }))
 vi.mock('react-native', () => ({ Platform: { OS: 'android' } }))
 vi.mock('../src/player/adapters/rnv', () => ({ requireVideo: () => rig.Video }))
@@ -21,8 +25,10 @@ vi.mock('../src/player/adapters/rnv', () => ({ requireVideo: () => rig.Video }))
 import { KitPlayer } from '../src/player/KitPlayer'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-function MockVideo(props: Record<string, unknown>) {
+function MockVideo(props: Record<string, any>) {
   rig.props = props
+  rig.sources.push({ uri: props.source.uri, startPosition: props.source.startPosition })
+  useImperativeHandle(props.ref as Ref<{ seek(s: number): void }> | undefined, () => ({ seek: (s: number) => rig.seek(s) }))
   useEffect(() => {
     rig.mounts++
     return () => {
@@ -89,13 +95,14 @@ const setApi = (r: KitPlayerRef | null) => {
 }
 /** What `renderControls` was last handed — the `state` a HUD reads (KIT-028). */
 const ctx: { state: PlayerState | null } = { state: null }
-function render(uri: string, headers?: Record<string, string>, opts?: { autoplay?: boolean }) {
+function render(uri: string, headers?: Record<string, string>, opts?: { autoplay?: boolean; startAt?: number }) {
   act(() =>
     root.render(
       <KitPlayer
         ref={setApi}
         source={{ uri, type: 'hls', headers }}
         autoplay={opts?.autoplay}
+        startAt={opts?.startAt}
         renderControls={(c) => {
           ctx.state = c.state
           return null
@@ -134,6 +141,8 @@ beforeEach(() => {
   rig.props = null
   rig.mounts = 0
   rig.unmounts = 0
+  rig.sources = []
+  rig.seek = vi.fn()
   onTracks.mockClear()
   onState.mockClear()
   onError.mockClear()
@@ -403,5 +412,73 @@ describe('FireOsAdapter — setVolume (DESC-006)', () => {
     const set = api!.setVolume
     act(() => set(0.3))
     expect(rig.props!.volume).toBe(0.3)
+  })
+})
+
+describe('FireOsAdapter — startAt (KIT-041)', () => {
+  const hasStart = () => 'startPosition' in rig.props!.source
+  /** react-native-video's `onProgress`, as the adapter maps it. */
+  const progress = (currentTime: number) => act(() => rig.props!.onProgress({ currentTime }))
+
+  it('passes startAt to react-native-video as source.startPosition in whole milliseconds', () => {
+    render(A, undefined, { startAt: 12.5 })
+    expect(rig.props!.source.startPosition).toBe(12500)
+    render(B, undefined, { startAt: 1.2345 })
+    expect(rig.props!.source.startPosition).toBe(1235)
+  })
+
+  it('passes no startPosition without startAt, or for 0, negative and non-finite startAt', () => {
+    const starts = [undefined, 0, -5, Number.NaN, Number.POSITIVE_INFINITY]
+    starts.forEach((startAt, i) => {
+      const uri = `https://u/${i}.m3u8`
+      render(uri, undefined, { startAt })
+      expect(rig.props!.source.uri).toBe(uri)
+      expect(hasStart(), `startAt ${startAt}`).toBe(false)
+    })
+  })
+
+  it('latches the start per load: a startAt change on the same uri leaves source unchanged and does not re-mount', () => {
+    render(A, undefined, { startAt: 10 })
+    render(A, undefined, { startAt: 99 })
+    expect(rig.props!.source.startPosition).toBe(10000)
+    expect([rig.mounts, rig.unmounts]).toEqual([1, 0])
+    expect(rig.sources.every((s) => s.startPosition === 10000)).toBe(true)
+  })
+
+  it("a source change takes the new render's startAt; a source without one gets none", () => {
+    render(A, undefined, { startAt: 10 })
+    render(B, undefined, { startAt: 30 })
+    expect(rig.props!.source.uri).toBe(B)
+    expect(rig.props!.source.startPosition).toBe(30000)
+    render('https://c/master.m3u8')
+    expect(hasStart()).toBe(false)
+  })
+
+  it("no render of the new source carries the previous source's start", () => {
+    render(A, undefined, { startAt: 10 })
+    render(B, undefined, { startAt: 30 })
+    const forB = rig.sources.filter((s) => s.uri === B)
+    expect(forB.length).toBeGreaterThan(0)
+    expect(forB.map((s) => s.startPosition)).toEqual(forB.map(() => 30000))
+  })
+
+  it('does not seek on load: the start is native', async () => {
+    render(A, undefined, { startAt: 12 })
+    await loadStart()
+    await load()
+    await release(0, MASTER_A)
+    expect(states()).toContain('ready')
+    expect(rig.seek).not.toHaveBeenCalled()
+    seek(5) // the rig's seek is wired: an app seek reaches it
+    expect(rig.seek).toHaveBeenCalledWith(5)
+  })
+
+  it('getPosition() answers startAt from mount until the first onProgress, then the reported time', async () => {
+    render(A, undefined, { startAt: 12 })
+    expect(api!.getPosition()).toBe(12)
+    await loadStart()
+    expect(api!.getPosition()).toBe(12)
+    await progress(12.25)
+    expect(api!.getPosition()).toBe(12.25)
   })
 })

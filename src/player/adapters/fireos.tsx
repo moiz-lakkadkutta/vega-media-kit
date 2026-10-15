@@ -21,6 +21,9 @@ interface Load {
 }
 const newLoad = (uri: string): Load => ({ uri, started: false, manifest: null, textUrls: new Map(), tracks: { audio: [], text: [] } })
 
+/** `startAt` in whole ms for react-native-video's `source.startPosition`; undefined when there is nothing to apply. */
+const startPositionMs = (s?: number) => (s !== undefined && Number.isFinite(s) && s > 0 ? Math.round(s * 1000) : undefined)
+
 /**
  * Fire OS adapter over react-native-video (ExoPlayer).
  * Native text rendering is disabled; cues are delivered by fetching the subtitle playlists and handing
@@ -30,6 +33,9 @@ const newLoad = (uri: string): Load => ({ uri, started: false, manifest: null, t
  * (docs/decisions/0004) and `TextTrack.url` comes from `#EXT-X-MEDIA:TYPE=SUBTITLES`.
  *
  * react-native-video is an optional peer dependency and is required lazily (./rnv) so the kit imports cleanly on Vega.
+ *
+ * `startAt` → `source.startPosition` (ms, applied by ExoPlayer before `prepare()`: no frame 0, no seek), read once per
+ * `source.uri` (KIT-041). https://docs.thewidlarzgroup.com/react-native-video/docs/v6/component/props#start-playback-at-a-specific-point-in-time
  */
 export const FireOsAdapter = forwardRef<KitPlayerRef, AdapterProps>(function FireOsAdapter(props, ref) {
   const Video = requireVideo()
@@ -39,6 +45,16 @@ export const FireOsAdapter = forwardRef<KitPlayerRef, AdapterProps>(function Fir
   /** react-native-video's `volume` prop (1.0 is its default). State, not a key: changing it never re-mounts <Video>. */
   const [volume, setVolume] = useState(1)
   const [audioIndex, setAudioIndex] = useState<number | undefined>()
+  /**
+   * The start of the current load, latched per source.uri (derived state: React docs, "storing information from
+   * previous renders"). Not read per render: react-native-video reloads when `source.startPosition` changes
+   * (`Source.equals`), so a startAt change on the same uri must not reach it. Not in the Load record: that is replaced
+   * in a layout effect, after the render that mounts the new <Video> (KIT-041).
+   */
+  const [start, setStart] = useState(() => ({ uri: props.source.uri, ms: startPositionMs(props.startAt) }))
+  if (start.uri !== props.source.uri) setStart({ uri: props.source.uri, ms: startPositionMs(props.startAt) })
+  // Computed defensively, so even a render pass React discards never pairs this uri with the previous one's start.
+  const startMs = start.uri === props.source.uri ? start.ms : startPositionMs(props.startAt)
   const position = useRef(props.startAt ?? 0)
   const load = useRef<Load>(newLoad(props.source.uri))
 
@@ -134,7 +150,12 @@ export const FireOsAdapter = forwardRef<KitPlayerRef, AdapterProps>(function Fir
       // events from an unmounted view, so nothing of the previous source can reach the new one's handlers.
       key={props.source.uri}
       ref={videoRef}
-      source={{ uri: props.source.uri, type: props.source.type === 'hls' ? 'm3u8' : 'mpd', headers: props.source.headers }}
+      source={{
+        uri: props.source.uri,
+        type: props.source.type === 'hls' ? 'm3u8' : 'mpd',
+        headers: props.source.headers,
+        ...(startMs !== undefined && { startPosition: startMs }),
+      }}
       paused={paused}
       rate={rate}
       // https://docs.thewidlarzgroup.com/react-native-video/docs/v6/component/props/#volume — 0.0 mutes, 1.0 full.

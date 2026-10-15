@@ -35,6 +35,12 @@ export interface KitPlayerRef {
 export interface KitPlayerProps {
   source: KitSource
   autoplay?: boolean
+  /**
+   * Seconds. Where each load of `source.uri` starts playing. Read once per load, on mount or when the uri changes;
+   * changing it while the uri stays the same does nothing (call `seek`). Fire OS: react-native-video
+   * `source.startPosition` (applied before the first frame). Web: `currentTime` at load. Vega:
+   * `player.load(uri, startAt)` (not device-verified). `getPosition()` answers it until the first position report.
+   */
   startAt?: number
   preferredAudio?: { language?: string; role?: AudioRole }
   /**
