@@ -7,6 +7,10 @@
     "type": "git",
     "url": "git+https://github.com/moiz-lakkadkutta/vega-media-kit.git"
   },
+  "homepage": "https://github.com/moiz-lakkadkutta/vega-media-kit#readme",
+  "bugs": {
+    "url": "https://github.com/moiz-lakkadkutta/vega-media-kit/issues"
+  },
   "keywords": [
     "fire-tv",
     "vega",
@@ -68,6 +72,9 @@
     "LICENSE",
     "CHANGELOG.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup",
     "test": "vitest run",

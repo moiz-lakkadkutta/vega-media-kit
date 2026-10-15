@@ -53,7 +53,7 @@ export function Player() {
 
 - **Fire OS — primary, device-verified.** Fire TV Stick (`AFTSS`, Fire OS 7.7.1.6), 2026-09-26: playback, audio switch, two text tracks at once, seek / pause / 0.75×, and our own HLS package from CloudFront. Results and open defects in [docs/device-matrix.md](docs/device-matrix.md).
 - **Web — supported.** Exercised in CI by a Playwright harness (`pnpm harness`: 29 specs that render the real `CueOverlay` and `KitPlayer` against a real `<video>` in Chromium). It is the CI guard of record.
-- **Vega — experimental, not device-verified.** The Vega adapter and platform bindings compile and are exported; nothing has been run on a Vega device or the Vega Virtual Device. The adapter does not work as written: the rewrite onto the `VideoPlayer` class and `KeplerVideoSurfaceView` (KIT-010, decision 0002) and the platform bindings (KIT-007) are deferred. The Vega bindings are no-ops today, and each one logs once (debug level) that Vega is experimental, with a link to decision 0001. No support promise in 0.1.0 — see [decision 0001](docs/decisions/0001-week0-gates.md).
+- **Vega — experimental, not device-verified.** The Vega adapter and platform bindings compile and are exported; nothing has been run on a Vega device or the Vega Virtual Device. The adapter does not work as written: the rewrite onto the `VideoPlayer` class and `KeplerVideoSurfaceView` (KIT-010, decision 0002) and the platform bindings (KIT-007) are deferred. The Vega bindings are no-ops today, and each one logs once (debug level) that Vega is experimental, with a link to decision 0001. No support promise in this release — see [decision 0001](docs/decisions/0001-week0-gates.md).
 
 ## Docs
 
