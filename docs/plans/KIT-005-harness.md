@@ -690,7 +690,7 @@ Commit message body must say: "Retires the two web structural guards in test/hls
 
 ```
 ---
-'@moizp/vega-media-kit': patch
+'@moiz0309/vega-media-kit': patch
 ---
 
 The web adapter now resolves HLS subtitle media playlists through `fetchHlsVtt` before handing text to the

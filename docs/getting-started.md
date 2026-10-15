@@ -1,7 +1,7 @@
 # Getting started
 
 ## Fire OS (Android TV) — the stick you already own
-1. `pnpm add @moizp/vega-media-kit react-native-video`
+1. `pnpm add @moiz0309/vega-media-kit react-native-video`
 2. Render `<KitPlayer source={{ uri, type: 'hls' }} />`. Native caption rendering is disabled; the kit fetches WebVTT and drives `<CueOverlay>`.
 3. Nothing else to pass for subtitles: the kit reads the master playlist itself and reports the text tracks through `onTracks`. See [Text tracks](#text-tracks).
 4. `adb connect <stick-ip> && adb install app-release.apk`.

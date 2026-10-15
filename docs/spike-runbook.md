@@ -152,7 +152,7 @@ Yarn 4's `link:` is for folders **without** a `package.json`; a sibling package 
 
 ```sh
 cd ~/hackathon/react-native-multi-tv-app-sample/packages/shared-ui
-yarn add @moizp/vega-media-kit@portal:../../../vega-media-kit
+yarn add @moiz0309/vega-media-kit@portal:../../../vega-media-kit
 cd ../.. && yarn install
 ```
 
@@ -440,8 +440,8 @@ import { Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 // NOTE: the kit does NOT export `isVega` — `src/platform/index.ts` re-exports only contentLauncher,
 // personalization, mediaControls, parentalControls and remote; `src/platform/os.ts` is internal.
 // Importing it gives `undefined` and calling it throws on the first render. Use Platform.OS here.
-import { CueOverlay, KitPlayer } from '@moizp/vega-media-kit'
-import type { Cue, KitPlayerRef, PlayerState, Tracks } from '@moizp/vega-media-kit'
+import { CueOverlay, KitPlayer } from '@moiz0309/vega-media-kit'
+import type { Cue, KitPlayerRef, PlayerState, Tracks } from '@moiz0309/vega-media-kit'
 
 // Switch streams by editing these two lines (see §3). Angel One: en/de/it/fr/es audio; en/el/fr/pt-BR WebVTT.
 const URI = 'https://storage.googleapis.com/shaka-demo-assets/angel-one-hls/hls.m3u8'

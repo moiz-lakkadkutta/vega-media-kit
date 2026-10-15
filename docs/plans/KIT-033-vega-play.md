@@ -242,7 +242,7 @@ Existing tests that must stay green unchanged: the four KIT-020 V1–V4 in this 
 `.changeset/kit-033-vega-play.md`:
 
 > ---
-> '@moizp/vega-media-kit': patch
+> '@moiz0309/vega-media-kit': patch
 > ---
 >
 > **Vega (experimental, not device-verified): `play()` and playback state follow the web adapter.** A refused

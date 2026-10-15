@@ -376,7 +376,7 @@ adapter-level tests. No adapter guard is added because no adapter changes.
 
 ```md
 ---
-'@moizp/vega-media-kit': patch
+'@moiz0309/vega-media-kit': patch
 ---
 
 **`getPosition()` never answers a previous source.** After `source.uri` changes, `ref.getPosition()` now answers the new

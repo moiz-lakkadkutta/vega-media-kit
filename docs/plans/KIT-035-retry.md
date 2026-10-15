@@ -270,7 +270,7 @@ const failed = useRef(false)       // D2: the live load reported a fatal onError
 
 ```md
 ---
-'@moizp/vega-media-kit': minor
+'@moiz0309/vega-media-kit': minor
 ---
 
 **`KitPlayerRef.reload()`: retry a source on the same uri.** After a fatal error (`MEDIA`, `EXO`, `SHAKA_*`), call

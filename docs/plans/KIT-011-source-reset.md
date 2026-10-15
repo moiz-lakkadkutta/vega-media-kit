@@ -268,7 +268,7 @@ optional.
 
 Append to `.changeset/release-0-1-0.md` (the 0.1.0 release notes are one file since `d36b2bc`; the file is
 already `minor`, and this is a `patch`-level fix within it). If 0.1.0 has been cut by the time this lands,
-write `.changeset/source-change-reset.md` with `'@moizp/vega-media-kit': patch` and the same paragraph.
+write `.changeset/source-change-reset.md` with `'@moiz0309/vega-media-kit': patch` and the same paragraph.
 
 ```
 **Switching `source` resets text selection and cues.** Changing `source.uri` now clears the selected text

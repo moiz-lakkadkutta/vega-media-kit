@@ -230,7 +230,7 @@ repo-wide — KIT-037 — do not gate on it.)
 
 ```md
 ---
-'@moizp/vega-media-kit': patch
+'@moiz0309/vega-media-kit': patch
 ---
 
 **`CueOverlay` `selectable` fixes.** `onFocusWord(word, index)` is now called, as documented: once each time the focused word changes and `focusedIndex` names an existing word (not for `null` or an index past the last word); `word` is the word as rendered, tags removed and punctuation kept. Only the bottom primary cues are selectable: `line: 'top'` cues no longer render word-by-word or take word indices, and `focusedIndex` counts words across all active primary cues in order instead of restarting in each cue (two words could be underlined at once). `<i>` and `<b>` keep their style in selectable cues, as they do elsewhere; word labels are unchanged. Selectable cues with duplicate ids no longer trigger React duplicate-key warnings. A focused word past the two-line clamp is still not visible; this is documented. No prop changes.
