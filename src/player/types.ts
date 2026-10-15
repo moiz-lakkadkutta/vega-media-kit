@@ -70,7 +70,10 @@ export interface KitPlayerProps {
    * Errors, by `code`: `HLS_MASTER` (the master playlist could not be read; non-fatal, playback continues without
    * manifest text tracks), `TEXT_FETCH` (a selected text track could not be loaded — HTTP error, a body that is
    * neither WebVTT nor an HLS media playlist, network failure; non-fatal, one per failed track per `selectText`,
-   * other selected tracks still load), `EXO` (Fire OS playback error, fatal), `SHAKA_<n>` (Vega, fatal), `MEDIA`
+   * other selected tracks still load), `EXO` (Fire OS playback error; fatal — the state becomes `error` — except
+   * ExoPlayer's behind-live-window, `cause.error.errorCode === '21002'` on react-native-video 6.x Android, which
+   * recovers by itself and is non-fatal), `SHAKA_<n>` (Vega; fatal — state `error` — when Shaka reports it CRITICAL or
+   * the load fails, non-fatal when Shaka is recovering), `MEDIA`
    * (web: the `<video>` element reported a `MediaError` — unreachable, undecodable or unsupported media; fatal, the
    * state becomes `error`; `cause` is the `MediaError`), `PLAY_REJECTED` (web: `play()` was refused, normally the
    * browser's autoplay policy; non-fatal, playback stays paused and a later `play()` can start it). Errors of a

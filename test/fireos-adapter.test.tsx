@@ -23,6 +23,7 @@ vi.mock('react-native', () => ({ Platform: { OS: 'android' } }))
 vi.mock('../src/player/adapters/rnv', () => ({ requireVideo: () => rig.Video }))
 
 import { KitPlayer } from '../src/player/KitPlayer'
+import { exoError } from '../src/player/adapters/fireos'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 function MockVideo(props: Record<string, any>) {
@@ -126,6 +127,17 @@ const selectAudio = (id: string) => act(() => api!.selectAudio(id))
 /** react-native-video's `onBuffer` / `onPlaybackStateChanged`, as the adapter maps them (`fireos.tsx` `<Video>`). */
 const buffer = (isBuffering: boolean) => act(() => rig.props!.onBuffer({ isBuffering }))
 const playbackState = (isPlaying: boolean) => act(() => rig.props!.onPlaybackStateChanged({ isPlaying }))
+/** react-native-video's Android `onError` payload (`OnVideoErrorData`); `errorCode` is `"2" + PlaybackException.errorCode`. */
+const exoErr = (errorCode?: string) => ({ error: { errorString: 'ExoPlaybackException', ...(errorCode === undefined ? {} : { errorCode }) } })
+const exo = (errorCode?: string) => act(() => rig.props!.onError(exoErr(errorCode)))
+/** `onError` and `onState` interleaved in call order: `['error', code]` / `['state', s]`. */
+const log = () =>
+  [
+    ...onError.mock.calls.map(([e], i) => [onError.mock.invocationCallOrder[i]!, ['error', e.code]] as const),
+    ...onState.mock.calls.map(([s], i) => [onState.mock.invocationCallOrder[i]!, ['state', s]] as const),
+  ]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, entry]) => entry)
 
 beforeEach(() => {
   vi.stubGlobal(
@@ -480,5 +492,134 @@ describe('FireOsAdapter — startAt (KIT-041)', () => {
     expect(api!.getPosition()).toBe(12)
     await progress(12.25)
     expect(api!.getPosition()).toBe(12.25)
+  })
+})
+
+describe('FireOsAdapter — fatal errors report error (KIT-034)', () => {
+  it('a playback error reports a fatal EXO through onError, then onState(error), and renderControls shows error', async () => {
+    render(A)
+    await loadStart()
+    await exo('22004') // ERROR_CODE_IO_BAD_HTTP_STATUS
+
+    expect(log()).toEqual([['state', 'loading'], ['error', 'EXO'], ['state', 'error']])
+    expect(onError.mock.calls[0]![0]).toMatchObject({ code: 'EXO', message: 'Playback error', fatal: true, cause: exoErr('22004') })
+    expect(ctx.state).toBe('error')
+  })
+
+  it('an error before onLoad: loading → buffering → error, and no onTracks or ready follows when the manifest resolves', async () => {
+    render(A)
+    await loadStart()
+    await buffer(true)
+    await exo('22004')
+    await release(0, MASTER_A) // ExoPlayer dispatches no onLoad after the error
+
+    expect(states()).toEqual(['loading', 'buffering', 'error'])
+    expect(onTracks).not.toHaveBeenCalled()
+    expect(ctx.state).toBe('error')
+  })
+
+  it('an error during the manifest await: onTracks is still published, ready is not (the kit drops ready after error)', async () => {
+    render(A)
+    await loadStart()
+    await load()
+    await exo('22004')
+    await release(0, MASTER_A)
+
+    expect(onTracks).toHaveBeenCalledTimes(1) // the tracks are true
+    expect(states()).toEqual(['loading', 'error'])
+    expect(ctx.state).toBe('error')
+  })
+
+  it("a mid-playback error is not overwritten by ExoPlayer's isPlaying:false that follows it", async () => {
+    render(A, undefined, { autoplay: true })
+    await loadStart()
+    await playbackState(true)
+    await exo('22004')
+    await playbackState(false) // onIsPlayingChanged(false), delivered after onPlayerError in the same update
+
+    expect(states()).toEqual(['loading', 'playing', 'error'])
+    expect(ctx.state).toBe('error')
+  })
+
+  it('onBuffer after a fatal error reports again: the player is running', async () => {
+    render(A)
+    await loadStart()
+    await exo('22004')
+    await buffer(true)
+    expect(states()).toEqual(['loading', 'error', 'buffering'])
+    await playbackState(false) // the latch was cleared: a real pause again
+
+    expect(states()).toEqual(['loading', 'error', 'buffering', 'paused'])
+    expect(ctx.state).toBe('paused')
+  })
+
+  it('behind-live-window (errorCode 21002) is a non-fatal EXO and changes no state', async () => {
+    render(A, undefined, { autoplay: true })
+    await loadStart()
+    await playbackState(true)
+    await exo('21002') // react-native-video re-prepares at the live edge by itself
+
+    expect(onError.mock.calls.map(([e]) => [e.code, e.fatal])).toEqual([['EXO', false]])
+    expect(states()).toEqual(['loading', 'playing'])
+    await playbackState(false) // and the latch is not set: a pause is still a pause
+    expect(states()).toEqual(['loading', 'playing', 'paused'])
+  })
+
+  it('an EXO with no errorCode, or an unrecognised one, is fatal', () => {
+    for (const e of [undefined, {}, { error: { errorCode: '22004' } }]) {
+      expect(exoError(e)).toEqual({ code: 'EXO', message: 'Playback error', fatal: true, cause: e })
+    }
+  })
+
+  it('a master-playlist failure is a non-fatal HLS_MASTER and never moves the state to error; ready still follows', async () => {
+    render(A)
+    await loadStart()
+    await fail(0)
+    await load()
+    await act(async () => {
+      await tick()
+    })
+
+    expect(onError.mock.calls.map(([e]) => [e.code, e.fatal])).toEqual([['HLS_MASTER', false]])
+    expect(states()).toEqual(['loading', 'ready'])
+    expect(ctx.state).toBe('ready')
+  })
+
+  it('a text track that cannot be loaded is a non-fatal TEXT_FETCH and never moves the state to error', async () => {
+    render(A)
+    await loadStart()
+    await load()
+    await release(0, MASTER_A)
+    expect(fetched().at(-1)).toBe('https://a/de.vtt') // preferredText de
+    await fail(1)
+
+    expect(onError.mock.calls.map(([e]) => [e.code, e.fatal])).toEqual([['TEXT_FETCH', false]])
+    expect(states()).toEqual(['loading', 'ready'])
+    await playbackState(false) // and the latch is not set by it
+    expect(states()).toEqual(['loading', 'ready', 'paused'])
+  })
+
+  it("the error latch is per load: after a switch, the new source's isPlaying:false reports paused and its ready is reported", async () => {
+    render(A, undefined, { autoplay: true })
+    await loadStart()
+    await playbackState(true)
+    await exo('22004')
+    render(B)
+    // Before B's onLoadStart, so only a per-load latch (not onLoadStart's clearing) lets it through.
+    await playbackState(false)
+    await loadStart()
+    await load()
+    await release(1, MASTER_B)
+
+    expect(states()).toEqual(['loading', 'playing', 'error', 'paused', 'loading', 'ready'])
+    expect(ctx.state).toBe('ready')
+  })
+
+  it('an error reported before onLoadStart (player init failure) still reports error', async () => {
+    render(A)
+    await exo('1001')
+
+    expect(log()).toEqual([['error', 'EXO'], ['state', 'error']])
+    expect(ctx.state).toBe('error')
   })
 })

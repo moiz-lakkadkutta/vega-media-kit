@@ -612,6 +612,19 @@ describe('KitPlayer latest-props callbacks and the origin gates (KIT-025)', () =
   })
 })
 
+describe('KitPlayer does not derive the error state (KIT-034, decision 0005 §3)', () => {
+  it('the kit does not derive a state from a fatal onError: an adapter that reports only onError leaves the state unchanged (0005 §3)', () => {
+    render('A', PREF_EMPTY)
+    act(() => latest.props!.onState?.('playing'))
+    const fatal: PlayerError = { code: 'EXO', message: 'Playback error', fatal: true }
+    act(() => latest.props!.onError?.(fatal))
+
+    expect(onError.mock.calls).toEqual([[fatal]])
+    expect(onState.mock.calls).toEqual([['playing']]) // `error` is the adapter's to report, after its onError
+    expect(ctx.state).toBe('playing')
+  })
+})
+
 describe('KitPlayer getTracks gate: the adapter is not asked until the live source has reported (KIT-020)', () => {
   const EMPTY: Tracks = { audio: [], text: [] }
   const desc = { id: 'a1', language: 'en', label: 'English (AD)', roles: ['description' as const], active: false }

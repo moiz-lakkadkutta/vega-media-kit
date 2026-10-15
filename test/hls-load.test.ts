@@ -366,6 +366,8 @@ describe('adapter wiring', () => {
     // A PIN of source order, not a behavioural test: the Vega scaffold cannot render under vitest (it `require`s
     // w3cmedia and shaka-player inside the component). KIT-010 replaces this with a real render test.
     const vega = src('player/adapters/vega.tsx')
-    expect(vega).toMatch(/await p\.load\([^)]*\)\s*\n\s*publishTracks\(\)\s*\n\s*props\.onState\?\.\('ready'\)/)
+    // Since KIT-034 the load sits in a try whose catch reports a failed load and returns, and a superseded load
+    // returns before publishing, so the pin skips that block.
+    expect(vega).toMatch(/await p\.load\([^)]*\)[^]*?\}\s*\n\s*if \(cancelled\) return[^\n]*\n\s*publishTracks\(\)\s*\n\s*props\.onState\?\.\('ready'\)/)
   })
 })

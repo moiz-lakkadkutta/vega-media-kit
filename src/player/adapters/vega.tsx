@@ -1,7 +1,7 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react'
 import { fromShakaText, fromShakaVariants } from '../../core'
 import type { Cue, Tracks } from '../../core'
-import type { AdapterProps, KitPlayerRef } from '../types'
+import type { AdapterProps, KitPlayerRef, PlayerError } from '../types'
 import { VEGA_DOCS, warnOnce } from '../../platform/log'
 import { requireShaka, requireW3cMedia } from './w3c'
 
@@ -29,6 +29,14 @@ export const VegaAdapter = forwardRef<KitPlayerRef, AdapterProps>(function VegaA
   useEffect(() => {
     const el = media.current
     if (!el) return
+    /** Set by this effect's cleanup: this load is superseded and reports nothing more. The one per-load flag. */
+    let cancelled = false
+    /**
+     * At most one fatal report per load, whichever of the `error` event and the `load()` rejection comes first.
+     * TODO(spike): confirm on the VVD whether Shaka on w3cmedia both dispatches `error` and rejects `load()` for the
+     * same failure (KIT-034 plan §7.2 V-D2); keep the dedupe either way.
+     */
+    let failed = false
     const p = new shaka.Player()
     player.current = p
     p.attach(el as unknown as HTMLMediaElement).then(async () => {
@@ -36,11 +44,28 @@ export const VegaAdapter = forwardRef<KitPlayerRef, AdapterProps>(function VegaA
       p.addEventListener('trackschanged', publishTracks)
       p.addEventListener('adaptation', publishTracks)
       p.addEventListener('buffering', (e: Event & { buffering?: boolean }) => props.onState?.(e.buffering ? 'buffering' : 'playing'))
-      p.addEventListener('error', (e: Event & { detail?: { code?: number; message?: string } }) =>
-        props.onError?.({ code: `SHAKA_${e.detail?.code ?? '?'}`, message: e.detail?.message ?? 'Playback error', fatal: true, cause: e.detail }),
-      )
+      p.addEventListener('error', (e: Event & { detail?: ShakaErrorLike }) => {
+        const err = shakaError(e.detail)
+        if (cancelled) return
+        if (err.fatal) {
+          if (failed) return
+          failed = true
+        }
+        props.onError?.(err) // onError first, then `error` (KIT-034)
+        if (err.fatal) props.onState?.('error')
+      })
       props.onState?.('loading')
-      await p.load(props.source.uri, props.startAt)
+      try {
+        await p.load(props.source.uri, props.startAt)
+      } catch (e) {
+        // A failed load is fatal whatever its severity: nothing is loaded. 7000/7001 only mean "superseded".
+        if (cancelled || isLoadInterrupted(e) || failed) return
+        failed = true
+        props.onError?.(shakaError(e as ShakaErrorLike, { fatal: true }))
+        props.onState?.('error')
+        return
+      }
+      if (cancelled) return // superseded while loading: no tracks, no ready (R-V1)
       publishTracks()
       props.onState?.('ready') // after onTracks (KIT-015); Vega is experimental (decision 0001), not device-verified
       if (props.autoplay) void el.play()
@@ -49,7 +74,10 @@ export const VegaAdapter = forwardRef<KitPlayerRef, AdapterProps>(function VegaA
     el.addEventListener('play', () => props.onState?.('playing'))
     el.addEventListener('pause', () => props.onState?.('paused'))
     el.addEventListener('ended', () => props.onState?.('ended'))
-    return () => { void p.destroy() }
+    return () => {
+      cancelled = true
+      void p.destroy()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.source.uri])
 
@@ -94,6 +122,30 @@ export const VegaAdapter = forwardRef<KitPlayerRef, AdapterProps>(function VegaA
 
   return <w3c.VideoPlayer ref={media} style={props.style ?? { flex: 1 }} testID={props.testID} />
 })
+
+/** The parts of a `shaka.util.Error` the kit reads. */
+type ShakaErrorLike = { code?: number; message?: string; severity?: number } | undefined
+/** `shaka.util.Error.Severity.CRITICAL`: "a new manifest must be loaded"; `RECOVERABLE` (1): Shaka is recovering. */
+const SHAKA_CRITICAL = 2
+/** `shaka.util.Error.Code` LOAD_INTERRUPTED / OPERATION_ABORTED: a superseded `load()` rejects with these. */
+const SHAKA_LOAD_INTERRUPTED = 7000
+const SHAKA_OPERATION_ABORTED = 7001
+
+/** The kit error for a Shaka error; fatal iff Shaka marks it CRITICAL, unless `opts.fatal` says otherwise. Exported for tests. */
+export function shakaError(detail: ShakaErrorLike, opts?: { fatal?: boolean }): PlayerError {
+  return {
+    code: `SHAKA_${detail?.code ?? '?'}`,
+    message: detail?.message ?? 'Playback error',
+    fatal: opts?.fatal ?? detail?.severity === SHAKA_CRITICAL,
+    cause: detail,
+  }
+}
+
+/** A `load()` rejection that only means "superseded" (7000 LOAD_INTERRUPTED, 7001 OPERATION_ABORTED). Exported for tests. */
+export function isLoadInterrupted(e: unknown): boolean {
+  const code = (e as { code?: unknown } | null | undefined)?.code
+  return code === SHAKA_LOAD_INTERRUPTED || code === SHAKA_OPERATION_ABORTED
+}
 
 /**
  * `KitPlayerRef.setVolume` on Vega: a no-op that says so once (KIT-018 convention). Vega is experimental and not

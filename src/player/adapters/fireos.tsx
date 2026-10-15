@@ -1,7 +1,7 @@
 import React, { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import { fromRnvAudio, fromRnvText } from '../../core'
 import type { TextTrack, Tracks } from '../../core'
-import type { AdapterProps, KitPlayerRef } from '../types'
+import type { AdapterProps, KitPlayerRef, PlayerError } from '../types'
 import { deprecatedTextUrls, fetchHlsVtt, loadHlsTextTracks } from '../hls'
 import { requireVideo } from './rnv'
 
@@ -18,8 +18,32 @@ interface Load {
   manifest: Promise<TextTrack[]> | null
   textUrls: Map<string, string>
   tracks: Tracks
+  /**
+   * Set by a fatal `EXO` (KIT-034). While set, ExoPlayer's `isPlaying: false` is the error's fallout — delivered after
+   * `onPlayerError` in the same playback-info update — not a pause, and must not overwrite `error`. Cleared by any
+   * sign the player is running again (`onBuffer`, `isPlaying: true`, `onLoadStart`). Per load, so it never leaks into
+   * the next source.
+   */
+  failed: boolean
 }
-const newLoad = (uri: string): Load => ({ uri, started: false, manifest: null, textUrls: new Map(), tracks: { audio: [], text: [] } })
+const newLoad = (uri: string): Load => ({ uri, started: false, manifest: null, textUrls: new Map(), tracks: { audio: [], text: [] }, failed: false })
+
+/**
+ * react-native-video's Android `errorCode` for ExoPlayer's `ERROR_CODE_BEHIND_LIVE_WINDOW` ("2" + 1002), which it
+ * recovers from by itself (seeks to the live edge and re-prepares). The `"2" + code` format is react-native-video
+ * 6.x Android; on a version that changes it, this error is reported fatal (KIT-034 plan R-2).
+ */
+const BEHIND_LIVE_WINDOW = '21002'
+
+/**
+ * The kit error for a react-native-video `onError` payload (`OnVideoErrorData`: `{ error: { errorCode?, … } }`).
+ * Fatal — playback stopped and will not resume without the app — except behind-live-window. A missing or
+ * unrecognised `errorCode` is fatal. Exported for tests only.
+ */
+export function exoError(e: unknown): PlayerError {
+  const errorCode = (e as { error?: { errorCode?: unknown } } | null | undefined)?.error?.errorCode
+  return { code: 'EXO', message: 'Playback error', fatal: errorCode !== BEHIND_LIVE_WINDOW, cause: e }
+}
 
 /** `startAt` in whole ms for react-native-video's `source.startPosition`; undefined when there is nothing to apply. */
 const startPositionMs = (s?: number) => (s !== undefined && Number.isFinite(s) && s > 0 ? Math.round(s * 1000) : undefined)
@@ -104,6 +128,7 @@ export const FireOsAdapter = forwardRef<KitPlayerRef, AdapterProps>(function Fir
   const onLoadStart = useCallback(() => {
     const l = load.current
     l.started = true
+    l.failed = false
     if (props.source.type === 'hls') {
       l.manifest = loadHlsTextTracks(l.uri, { headers: props.source.headers }).catch((e) => {
         // Non-fatal: without the manifest the adapter falls back to ExoPlayer's own text track list.
@@ -167,10 +192,28 @@ export const FireOsAdapter = forwardRef<KitPlayerRef, AdapterProps>(function Fir
       onLoadStart={onLoadStart}
       onLoad={onLoad}
       onProgress={(e: { currentTime: number }) => { position.current = e.currentTime; props.onPosition?.(e.currentTime) }}
-      onBuffer={(e: { isBuffering: boolean }) => props.onState?.(e.isBuffering ? 'buffering' : paused ? 'paused' : 'playing')}
-      onPlaybackStateChanged={(e: { isPlaying: boolean }) => props.onState?.(e.isPlaying ? 'playing' : 'paused')}
+      onBuffer={(e: { isBuffering: boolean }) => {
+        load.current.failed = false // onBuffer only fires from STATE_BUFFERING / STATE_READY: running again
+        props.onState?.(e.isBuffering ? 'buffering' : paused ? 'paused' : 'playing')
+      }}
+      onPlaybackStateChanged={(e: { isPlaying: boolean }) => {
+        const l = load.current
+        if (e.isPlaying) l.failed = false
+        else if (l.failed) return // the fatal error's fallout, not a pause: `error` stays (KIT-034)
+        props.onState?.(e.isPlaying ? 'playing' : 'paused')
+      }}
       onEnd={() => props.onState?.('ended')}
-      onError={(e: unknown) => props.onError?.({ code: 'EXO', message: 'Playback error', fatal: true, cause: e })}
+      onError={(e: unknown) => {
+        // Not gated on `started`: a player init failure (1001) can precede onLoadStart. `onError` first, then
+        // `error`, synchronously — as web (KIT-034).
+        const err = exoError(e)
+        const l = load.current
+        props.onError?.(err)
+        if (err.fatal) {
+          l.failed = true
+          props.onState?.('error')
+        }
+      }}
       testID={props.testID}
     />
   )
