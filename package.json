@@ -1,6 +1,6 @@
 {
   "name": "@moiz0309/vega-media-kit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "One player API, one cue model, one set of Fire TV platform bindings for React Native apps on Fire OS and Vega OS.",
   "license": "MIT",
   "repository": {

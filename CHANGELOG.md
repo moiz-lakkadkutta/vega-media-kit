@@ -1,10 +1,24 @@
 # Changelog
 
+## 0.2.0
+
+First release on npm, published as `@moiz0309/vega-media-kit` (`npm i @moiz0309/vega-media-kit`). Earlier docs and pre-release notes name it `@moizp/vega-media-kit`; that scope was never published. 0.1.0 was never published to npm.
+
+### Minor Changes
+
+- f839be4: **Fire OS and Vega report `onState('error')` after a fatal error.** As on web since the last release, a source that cannot be loaded or played now reports its fatal error through `onError` and then `onState('error')`; no `ready` follows. Previously Fire OS stayed at `loading`/`buffering` (or showed `paused` after a mid-playback failure). Fire OS: ExoPlayer's behind-live-window error (`cause.error.errorCode === '21002'`), which react-native-video recovers from by itself, is now `fatal: false` and changes no state. Vega (experimental): a Shaka error is fatal only when Shaka marks it CRITICAL, and a failed load now reaches `onError` instead of being an unhandled rejection. `HLS_MASTER` and `TEXT_FETCH` remain non-fatal and never change the state. To try again, change `source`. Apps that only read `buffering` / `paused` / `ended` see nothing new; an error UI keyed on `onError` keeps working.
+
+### Patch Changes
+
+- 34289aa: Fire OS: `startAt` is now applied. Playback used to start at 0 while `getPosition()` reported `startAt`.
+  react-native-video's `source.startPosition` now starts each load at `startAt`, with no frame-0 flash and no seek.
+  `startAt` is read once per `source.uri`. Apps that seeked to `startAt` themselves after `ready` can drop that seek.
+
 ## 0.1.0
 
 First release. One player API (`KitPlayer`), one cue model (WebVTT parser, cue scheduler, `CueOverlay`), track normalization, Fire TV platform bindings and focus helpers for React Native on Fire OS (device-verified) and web (Playwright harness). Vega OS is experimental and not device-verified.
 
-Published to npm as `@moiz0309/vega-media-kit` (`npm i @moiz0309/vega-media-kit`). Earlier docs and pre-release notes name it `@moizp/vega-media-kit`; that scope was never published.
+Tagged `v0.1.0` and released on GitHub only; 0.1.0 was never published to npm under any name.
 
 ### Minor Changes
 
