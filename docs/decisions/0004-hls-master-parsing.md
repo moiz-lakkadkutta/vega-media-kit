@@ -18,7 +18,7 @@ The kit now reads the master playlist itself, so `TextTrack.url` is populated fr
 
 **1. The pure parser lives in `src/core/hls.ts`, public via `./core`.** `CLAUDE.md` requires `core` to stay
 free of React Native because it "runs in Node, used by media pipelines" — and HLS parsing is exactly that.
-The decisive evidence is that `described/packages/pipeline` already imports `@moizp/vega-media-kit/core` in
+The decisive evidence is that `described/packages/pipeline` already imports `@moiz0309/vega-media-kit/core` in
 four files (`prompts.ts`, `steps/08-text.ts`, `work/dry-pack.mts`), while `./player` cannot be imported in
 Node at all, since `KitPlayer.tsx` imports `react-native`. A pipeline can only reach a parser through core.
 

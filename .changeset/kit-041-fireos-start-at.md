@@ -1,5 +1,5 @@
 ---
-'@moizp/vega-media-kit': patch
+'@moiz0309/vega-media-kit': patch
 ---
 
 Fire OS: `startAt` is now applied. Playback used to start at 0 while `getPosition()` reported `startAt`.

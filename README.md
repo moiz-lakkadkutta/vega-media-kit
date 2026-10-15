@@ -5,7 +5,7 @@
 Built during the [Build, Ship, Shape: Amazon Developer Hackathon](https://amazonappdev2026.devpost.com/) (Sept–Oct 2026) as the shared foundation of two Fire TV apps — [Described](https://github.com/moiz-lakkadkutta/described) (AI audio description) and [Lingo](https://github.com/moiz-lakkadkutta/lingo) (learn a language from TV). MIT.
 
 ```
-pnpm add @moizp/vega-media-kit
+pnpm add @moiz0309/vega-media-kit
 # Fire OS:  pnpm add react-native-video
 # Vega (experimental, unverified): @amazon-devices/react-native-w3cmedia ships with the Vega SDK; install Shaka per AmazonAppDev/vega-video-sample's post-install step
 ```
@@ -13,8 +13,8 @@ pnpm add @moizp/vega-media-kit
 ## Ten minutes to a playing video
 
 ```tsx
-import { KitPlayer, CueOverlay } from '@moizp/vega-media-kit'
-import type { Cue, KitPlayerRef, TextTrack } from '@moizp/vega-media-kit'
+import { KitPlayer, CueOverlay } from '@moiz0309/vega-media-kit'
+import type { Cue, KitPlayerRef, TextTrack } from '@moiz0309/vega-media-kit'
 
 export function Player() {
   const ref = useRef<KitPlayerRef>(null)
@@ -49,7 +49,7 @@ export function Player() {
 
 ## Status
 
-0.1.0 (`npm i @moizp/vega-media-kit`). `core`, `player`, `cues`, `platform` and `focus` are covered by 303 vitest cases (`pnpm test`). Text tracks come from the HLS master playlist, not from anything the app passes (decision 0004).
+0.1.0 (`npm i @moiz0309/vega-media-kit`). `core`, `player`, `cues`, `platform` and `focus` are covered by 303 vitest cases (`pnpm test`). Text tracks come from the HLS master playlist, not from anything the app passes (decision 0004).
 
 - **Fire OS — primary, device-verified.** Fire TV Stick (`AFTSS`, Fire OS 7.7.1.6), 2026-09-26: playback, audio switch, two text tracks at once, seek / pause / 0.75×, and our own HLS package from CloudFront. Results and open defects in [docs/device-matrix.md](docs/device-matrix.md).
 - **Web — supported.** Exercised in CI by a Playwright harness (`pnpm harness`: 29 specs that render the real `CueOverlay` and `KitPlayer` against a real `<video>` in Chromium). It is the CI guard of record.

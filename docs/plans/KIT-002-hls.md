@@ -35,7 +35,7 @@ Why core, despite the public-surface cost that made KIT-009 put `selection.ts` i
 - `./player` cannot be imported in plain Node at all: `src/player/index.ts` → `KitPlayer.tsx` →
   `import { Platform } from 'react-native'` (`src/player/KitPlayer.tsx:2`). A media pipeline that wants to parse a
   master playlist (for example `described/packages/pipeline`, which already imports `serializeVtt` and `lintCues`
-  from `@moizp/vega-media-kit/core` — `packages/pipeline/src/steps/08-text.ts:2`) can only reach it through
+  from `@moiz0309/vega-media-kit/core` — `packages/pipeline/src/steps/08-text.ts:2`) can only reach it through
   `./core`. `CLAUDE.md`'s "runs in Node, used by media pipelines" is a literal description of this consumer.
 - The precedent that fits is `src/core/tracks.ts`, not `selection.ts`: a pure transform over a platform's data
   shape (Shaka/ExoPlayer track objects there; playlist text here) into kit types. `selection.ts` is KitPlayer's

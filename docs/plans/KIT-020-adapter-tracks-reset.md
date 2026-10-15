@@ -368,7 +368,7 @@ and W1 become kit-gate guards, not adapter guards. Adapter guards are W2/W3/W5 (
 
 ```md
 ---
-'@moizp/vega-media-kit': patch
+'@moiz0309/vega-media-kit': patch
 ---
 
 **`getTracks()` never answers a previous source.** After `source.uri` changes, `ref.getTracks()` now returns an empty

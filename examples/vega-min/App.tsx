@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react'
 import { View } from 'react-native'
-import { KitPlayer, CueOverlay } from '@moizp/vega-media-kit'
-import type { Cue, KitPlayerRef } from '@moizp/vega-media-kit'
+import { KitPlayer, CueOverlay } from '@moiz0309/vega-media-kit'
+import type { Cue, KitPlayerRef } from '@moiz0309/vega-media-kit'
 
 // Apple's HLS example with multiple audio and subtitle tracks.
 const SRC = 'https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_adv_example_hevc/master.m3u8'
