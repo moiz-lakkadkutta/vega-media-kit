@@ -78,7 +78,7 @@ describe('parseHlsMaster — errors and tolerance', () => {
   })
   it('accepts CRLF line endings and a leading BOM', () => {
     const lf = '#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="t",NAME="English",LANGUAGE="en",URI="s/en.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv.m3u8\n'
-    const crlf = `﻿${lf.replace(/\n/g, '\r\n')}`
+    const crlf = `\uFEFF${lf.replace(/\n/g, '\r\n')}`
     expect(parseHlsMaster(crlf)).toEqual(parseHlsMaster(lf))
     expect(parseHlsMaster(crlf).renditions[0]!.uri).toBe('s/en.m3u8')
   })

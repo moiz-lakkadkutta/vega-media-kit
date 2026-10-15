@@ -10,6 +10,6 @@ export type RnvVideo = React.ComponentType<Record<string, unknown>>
  * inside the adapter (test/fireos-adapter.test.tsx).
  */
 export function requireVideo(): RnvVideo {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require('react-native-video').default as RnvVideo
 }

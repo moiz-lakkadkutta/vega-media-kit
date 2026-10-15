@@ -196,7 +196,7 @@ export function joinVttSegments(segments: readonly string[]): string {
   const kept: string[] = []
   for (const segment of segments) {
     const blocks = segment
-      .replace(/^﻿/, '')
+      .replace(/^\uFEFF/, '')
       .replace(/\r\n?/g, '\n')
       .split(/\n[ \t]*\n+/)
       .map((b) => b.trim())

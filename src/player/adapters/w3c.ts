@@ -10,10 +10,10 @@ export type W3cMedia = { VideoPlayer: React.ComponentType<Record<string, unknown
  * from the scaffold; they are confirmed (or not) by KIT-010 on the VVD.
  */
 export function requireW3cMedia(): W3cMedia {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require('@amazon-devices/react-native-w3cmedia') as W3cMedia
 }
 export function requireShaka(): typeof import('shaka-player') {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require('shaka-player') as typeof import('shaka-player') // installed via the sample's post-install step
 }
